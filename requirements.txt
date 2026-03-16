@@ -1,0 +1,8 @@
+langgraph-swarm
+langchain-ollama
+discord.py
+chromadb
+py-ipfs-http-client
+gradio
+requests
+feedparser
