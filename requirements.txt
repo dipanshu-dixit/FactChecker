@@ -1,8 +1,9 @@
-langgraph-swarm
-langchain-ollama
+langgraph
+langchain-openai
 discord.py
 chromadb
-py-ipfs-http-client
-gradio
-requests
+httpx
+beautifulsoup4
+python-dotenv
 feedparser
+requests

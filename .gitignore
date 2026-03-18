@@ -4,6 +4,6 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-anchor_data/
+crawlconda_data/
 .chroma/
 *.log

@@ -3,7 +3,7 @@
   "features": {
     "ghcr.io/prulloac/devcontainer-features/ollama:1": {}
   },
-  "postCreateCommand": "ollama pull phi3:mini && pip install -r requirements.txt",
+  "postCreateCommand": "pip install -r requirements.txt",
   "forwardPorts": [11434],
   "customizations": {
     "vscode": {
