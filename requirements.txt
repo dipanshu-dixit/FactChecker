@@ -1,4 +1,6 @@
 langgraph
+fastapi
+uvicorn
 langchain-openai
 discord.py
 chromadb
