@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CrawlConda — AI Fact Checker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d0d;
+      color: #e8e8e8;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid #1e1e1e;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: #7c6af7; }
+
+    nav a {
+      color: #888;
+      text-decoration: none;
+      margin-left: 24px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    nav a:hover { color: #e8e8e8; }
+
+    .page { display: none; max-width: 760px; margin: 0 auto; padding: 48px 24px; }
+    .page.active { display: block; }
+
+    /* HERO */
+    .hero { text-align: center; margin-bottom: 40px; }
+    .hero h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 12px; }
+    .hero h1 span { color: #7c6af7; }
+    .hero p { color: #888; font-size: 1rem; line-height: 1.6; }
+
+    /* SEARCH */
+    .search-box {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .search-box input {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 14px 18px;
+      color: #e8e8e8;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box input:focus { border-color: #7c6af7; }
+    .search-box input::placeholder { color: #555; }
+
+    button {
+      background: #7c6af7;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 14px 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+    button:hover { background: #6a58e0; }
+    button:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+    .examples { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; }
+    .example-chip {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      color: #888;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .example-chip:hover { border-color: #7c6af7; color: #e8e8e8; }
+
+    /* STATUS */
+    .status {
+      text-align: center;
+      padding: 32px;
+      color: #888;
+      font-size: 0.95rem;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #2a2a2a;
+      border-top-color: #7c6af7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* VERDICT CARD */
+    .verdict-card {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+    .verdict-card.CONFIRMED { border-left: 4px solid #22c55e; }
+    .verdict-card.PARTIALLY { border-left: 4px solid #eab308; }
+    .verdict-card.UNCONFIRMED { border-left: 4px solid #f97316; }
+    .verdict-card.FALSE { border-left: 4px solid #ef4444; }
+
+    .verdict-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .verdict-emoji { font-size: 2rem; }
+    .verdict-label {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .verdict-claim {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 2px;
+    }
+
+    .verdict-summary {
+      color: #ccc;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      margin-bottom: 20px;
+      white-space: pre-wrap;
+    }
+
+    .sources-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+
+    .source-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .source-item:last-child { border-bottom: none; }
+    .source-dot { width: 6px; height: 6px; background: #7c6af7; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+    .source-item a {
+      color: #a89ff7;
+      text-decoration: none;
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+    .source-item a:hover { color: #fff; }
+    .source-name { font-size: 0.75rem; color: #555; margin-top: 2px; }
+
+    /* VOTE */
+    .vote-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #1e1e1e;
+    }
+    .vote-label { font-size: 0.85rem; color: #666; margin-right: 4px; }
+    .vote-btn {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      color: #888;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .vote-btn:hover { border-color: #7c6af7; color: #e8e8e8; background: #1a1a1a; }
+    .vote-btn.active-up { border-color: #22c55e; color: #22c55e; background: #1a1a1a; }
+    .vote-btn.active-down { border-color: #ef4444; color: #ef4444; background: #1a1a1a; }
+    .vote-count { font-size: 0.85rem; font-weight: 600; }
+
+    .ipfs-link {
+      margin-top: 16px;
+      font-size: 0.78rem;
+      color: #444;
+    }
+    .ipfs-link a { color: #555; text-decoration: none; }
+    .ipfs-link a:hover { color: #888; }
+
+    /* VERDICTS LIST */
+    .verdicts-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .verdicts-header h2 { font-size: 1.4rem; font-weight: 700; }
+    .refresh-btn {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      color: #888;
+      border-radius: 8px;
+    }
+    .refresh-btn:hover { color: #e8e8e8; border-color: #7c6af7; background: #1a1a1a; }
+
+    .verdict-list-item {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .verdict-list-item:hover { border-color: #7c6af7; }
+    .list-emoji { font-size: 1.5rem; flex-shrink: 0; }
+    .list-content { flex: 1; min-width: 0; }
+    .list-claim {
+      font-size: 0.95rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .list-meta { font-size: 0.78rem; color: #555; display: flex; gap: 12px; }
+    .list-votes { font-size: 0.85rem; color: #666; flex-shrink: 0; text-align: right; }
+
+    .empty { text-align: center; padding: 60px 0; color: #555; }
+
+    /* ABOUT */
+    .about-section { margin-bottom: 36px; }
+    .about-section h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 12px; }
+    .about-section p { color: #888; line-height: 1.7; font-size: 0.95rem; margin-bottom: 10px; }
+
+    .pipeline {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 20px;
+      margin: 16px 0;
+    }
+    .pipeline-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 10px 0;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .pipeline-step:last-child { border-bottom: none; }
+    .step-num {
+      width: 24px; height: 24px;
+      background: #7c6af7;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-text { font-size: 0.88rem; color: #ccc; line-height: 1.5; }
+    .step-text strong { color: #e8e8e8; }
+
+    .verdict-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    .verdict-table th, .verdict-table td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid #1e1e1e;
+      font-size: 0.88rem;
+    }
+    .verdict-table th { color: #666; font-weight: 600; }
+    .verdict-table td { color: #ccc; }
+
+    .discord-banner {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .discord-banner p { color: #aaa; font-size: 0.9rem; }
+    .discord-btn {
+      background: #5865f2;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      white-space: nowrap;
+      text-decoration: none;
+      color: #fff;
+      font-weight: 600;
+    }
+    .discord-btn:hover { background: #4752c4; }
+
+    .error-msg {
+      background: #1a0a0a;
+      border: 1px solid #3a1a1a;
+      border-radius: 10px;
+      padding: 16px 20px;
+      color: #f87171;
+      font-size: 0.9rem;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 600px) {
+      header { padding: 14px 16px; }
+      .logo { font-size: 1rem; }
+      nav a { margin-left: 14px; font-size: 0.82rem; }
+      .page { padding: 28px 16px; }
+      .hero h1 { font-size: 1.6rem; }
+      .hero p { font-size: 0.88rem; }
+      .search-box { flex-direction: column; }
+      .search-box button { width: 100%; }
+      .examples { gap: 6px; }
+      .example-chip { font-size: 0.75rem; padding: 5px 11px; }
+      .verdict-card { padding: 18px 16px; }
+      .verdict-emoji { font-size: 1.6rem; }
+      .verdict-label { font-size: 0.95rem; }
+      .verdict-summary { font-size: 0.88rem; }
+      .vote-row { flex-wrap: wrap; gap: 8px; }
+      .list-votes { display: none; }
+      .discord-banner { flex-direction: column; text-align: center; }
+      .pipeline-step { gap: 10px; }
+      .verdict-table th, .verdict-table td { padding: 8px 10px; font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Crawl<span>Conda</span></div>
+  <nav>
+    <a onclick="showPage('verify')">Verify</a>
+    <a onclick="showPage('verdicts')">Verdicts</a>
+    <a onclick="showPage('about')">About</a>
+  </nav>
+</header>
+
+<!-- VERIFY PAGE -->
+<div class="page active" id="page-verify">
+  <div class="hero">
+    <h1>AI <span>Fact Checker</span></h1>
+    <p>Enter any claim. CrawlConda searches 24 live news sources and returns a source-grounded verdict — pinned permanently to IPFS.</p>
+  </div>
+
+  <div class="search-box">
+    <input type="text" id="claim-input" placeholder="Enter a claim to fact-check..." onkeydown="if(event.key==='Enter') runVerify()" />
+    <button id="verify-btn" onclick="runVerify()">Verify</button>
+  </div>
+
+  <div class="examples">
+    <span class="example-chip" onclick="setExample(this)">Is Khamenei dead</span>
+    <span class="example-chip" onclick="setExample(this)">Iran struck Qatar gas facilities</span>
+    <span class="example-chip" onclick="setExample(this)">Apple released a new chip</span>
+    <span class="example-chip" onclick="setExample(this)">WHO declared a health emergency</span>
+    <span class="example-chip" onclick="setExample(this)">Did Messi score last night</span>
+  </div>
+
+  <div id="verify-result"></div>
+</div>
+
+<!-- VERDICTS PAGE -->
+<div class="page" id="page-verdicts">
+  <div class="verdicts-header">
+    <h2>Past Verdicts</h2>
+    <button class="refresh-btn" onclick="loadVerdicts()">↻ Refresh</button>
+  </div>
+  <div id="verdicts-list"></div>
+</div>
+
+<!-- ABOUT PAGE -->
+<div class="page" id="page-about">
+  <div class="about-section">
+    <h2>What is CrawlConda</h2>
+    <p>CrawlConda is an AI fact-checking system. Give it any claim — it searches 24 live RSS feeds across world news, business, tech, science, and sport, runs a 4-node AI pipeline, and returns a source-grounded verdict.</p>
+    <p>Every verdict is pinned permanently to IPFS. Humans can confirm or challenge any verdict — votes are stored alongside the AI verdict forever.</p>
+  </div>
+
+  <div class="about-section">
+    <h2>How It Works</h2>
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="step-num">1</div>
+        <div class="step-text"><strong>Expander</strong> — converts your claim into optimised RSS search keywords</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">2</div>
+        <div class="step-text"><strong>Searcher</strong> — scans all 24 feeds + Google News, ranks by relevance, returns top 8 articles</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">3</div>
+        <div class="step-text"><strong>Scanner</strong> — extracts only facts explicitly stated in sources, no outside knowledge</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">4</div>
+        <div class="step-text"><strong>Verdict</strong> — strict source-grounded verdict with exact headline citation</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="about-section">
+    <h2>Verdicts</h2>
+    <table class="verdict-table">
+      <tr><th>Verdict</th><th>Meaning</th></tr>
+      <tr><td>✅ CONFIRMED</td><td>Sources explicitly report the event</td></tr>
+      <tr><td>🟡 PARTIALLY CONFIRMED</td><td>Sources support part of the claim but not all details</td></tr>
+      <tr><td>⚠️ UNCONFIRMED</td><td>Sources found but none mention the claim</td></tr>
+      <tr><td>❌ FALSE</td><td>Sources explicitly contradict the claim</td></tr>
+    </table>
+  </div>
+
+  <div class="about-section">
+    <h2>Open Source & Self-Hostable</h2>
+    <p>CrawlConda is fully open source. Clone the repo, add your own API keys, and run your own instance.</p>
+    <p><a href="https://github.com/yourname/crawlconda" style="color:#7c6af7">github.com/yourname/crawlconda</a></p>
+  </div>
+
+  <div class="discord-banner">
+    <p>See CrawlConda in action on Discord — run <strong>!verify</strong> with any claim.</p>
+    <a href="https://discord.gg/4hX4f7cu" class="discord-btn" target="_blank">Join Discord</a>
+  </div>
+</div>
+
+<script>
+  const API = "https://api-production-241e.up.railway.app";
+
+  const EMOJI = {
+    "CONFIRMED": "✅",
+    "PARTIALLY CONFIRMED": "🟡",
+    "UNCONFIRMED": "⚠️",
+    "FALSE": "❌"
+  };
+
+  const BORDER_CLASS = {
+    "CONFIRMED": "CONFIRMED",
+    "PARTIALLY CONFIRMED": "PARTIALLY",
+    "UNCONFIRMED": "UNCONFIRMED",
+    "FALSE": "FALSE"
+  };
+
+  function showPage(name) {
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.getElementById("page-" + name).classList.add("active");
+    if (name === "verdicts") {
+      loadVerdicts();
+      clearInterval(window._verdictTimer);
+      window._verdictTimer = setInterval(loadVerdicts, 30000);
+    } else {
+      clearInterval(window._verdictTimer);
+    }
+  }
+
+  function setExample(el) {
+    document.getElementById("claim-input").value = el.textContent;
+  }
+
+  function getUserId() {
+    let id = localStorage.getItem("cc_user_id");
+    if (!id) {
+      id = "web_" + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("cc_user_id", id);
+    }
+    return id;
+  }
+
+  async function runVerify() {
+    const claim = document.getElementById("claim-input").value.trim();
+    if (!claim) return;
+
+    const btn = document.getElementById("verify-btn");
+    const result = document.getElementById("verify-result");
+
+    btn.disabled = true;
+    btn.textContent = "Verifying...";
+    result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 24 sources and analysing...</div>`;
+
+    try {
+      const res = await fetch(`${API}/verify?claim=${encodeURIComponent(claim)}`);
+      if (!res.ok) throw new Error("API error " + res.status);
+      const data = await res.json();
+      result.innerHTML = renderVerdictCard(data, true);
+    } catch (e) {
+      result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = "Verify";
+  }
+
+  function renderVerdictCard(data, showVote) {
+    const verdict = data.verdict || "UNCONFIRMED";
+    const emoji = data.emoji || EMOJI[verdict] || "🔍";
+    const borderClass = BORDER_CLASS[verdict] || "";
+    const summary = (data.summary || "").replace(/^VERDICT:.*\n\n?/i, "").trim();
+    const sources = data.sources || [];
+    const hash = data.ipfs_hash || "";
+    const ipfsUrl = data.ipfs_url || "";
+    const upvotes = data.human_upvotes || 0;
+    const downvotes = data.human_downvotes || 0;
+
+    const sourcesHtml = sources.slice(0, 5).map(s => `
+      <div class="source-item">
+        <div class="source-dot"></div>
+        <div>
+          <a href="${s.url}" target="_blank" rel="noopener">${s.title}</a>
+          <div class="source-name">${s.source}</div>
+        </div>
+      </div>
+    `).join("");
+
+    const voteHtml = showVote && hash ? `
+      <div class="vote-row">
+        <span class="vote-label">Was this verdict accurate?</span>
+        <button class="vote-btn" id="btn-up-${hash}" onclick="castVote('${hash}', 'up')">
+          👍 <span class="vote-count" id="up-${hash}">${upvotes}</span>
+        </button>
+        <button class="vote-btn" id="btn-down-${hash}" onclick="castVote('${hash}', 'down')">
+          👎 <span class="vote-count" id="down-${hash}">${downvotes}</span>
+        </button>
+      </div>
+    ` : "";
+
+    const ipfsHtml = ipfsUrl ? `
+      <div class="ipfs-link">
+        🌐 Permanent record: <a href="${ipfsUrl}" target="_blank">${hash.slice(0, 20)}...</a>
+      </div>
+    ` : "";
+
+    return `
+      <div class="verdict-card ${borderClass}">
+        <div class="verdict-header">
+          <div class="verdict-emoji">${emoji}</div>
+          <div>
+            <div class="verdict-label">${verdict}</div>
+            <div class="verdict-claim">${data.claim || ""}</div>
+          </div>
+        </div>
+        <div class="verdict-summary">${summary}</div>
+        ${sources.length ? `<div class="sources-title">Sources</div>${sourcesHtml}` : ""}
+        ${voteHtml}
+        ${ipfsHtml}
+      </div>
+    `;
+  }
+
+  async function castVote(hash, vote) {
+    const userId = getUserId();
+    try {
+      await fetch(`${API}/confirm/${hash}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vote, user_id: userId })
+      });
+      const r = await fetch(`${API}/verdict/${hash}`);
+      const data = await r.json();
+      document.getElementById(`up-${hash}`).textContent = data.human_upvotes || 0;
+      document.getElementById(`down-${hash}`).textContent = data.human_downvotes || 0;
+      document.getElementById(`btn-up-${hash}`).className = "vote-btn" + (vote === "up" ? " active-up" : "");
+      document.getElementById(`btn-down-${hash}`).className = "vote-btn" + (vote === "down" ? " active-down" : "");
+    } catch(e) {}
+  }
+
+  async function loadVerdicts() {
+    const list = document.getElementById("verdicts-list");
+    list.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdicts...</div>`;
+    try {
+      const res = await fetch(`${API}/verdicts?limit=50`);
+      const data = await res.json();
+      const items = (data.verdicts || []).slice().reverse();
+      if (!items.length) {
+        list.innerHTML = `<div class="empty">No verdicts yet. Be the first to verify a claim.</div>`;
+        return;
+      }
+      list.innerHTML = items.map(v => {
+        const raw = v.verdict || "UNCONFIRMED";
+        const verdict = Object.keys(EMOJI).find(k => raw.toUpperCase().includes(k)) || "UNCONFIRMED";
+        const emoji = EMOJI[verdict] || "🔍";
+        const claim = v.claim || v.content || "Unknown claim";
+        const hash = v.ipfs_hash || v.id || "";
+        const up = v.human_upvotes || 0;
+        const down = v.human_downvotes || 0;
+        const date = v.timestamp || v.id ? new Date(v.timestamp || v.id).toLocaleDateString() : "";
+        return `
+          <div class="verdict-list-item" onclick="openVerdict('${hash}')">
+            <div class="list-emoji">${emoji}</div>
+            <div class="list-content">
+              <div class="list-claim">${claim}</div>
+              <div class="list-meta">
+                <span>${verdict}</span>
+                ${date ? `<span>${date}</span>` : ""}
+              </div>
+            </div>
+            <div class="list-votes">👍 ${up} 👎 ${down}</div>
+          </div>
+        `;
+      }).join("");
+    } catch(e) {
+      list.innerHTML = `<div class="error-msg">⚠️ Could not load verdicts.</div>`;
+    }
+  }
+
+  async function openVerdict(hash) {
+    if (!hash) return;
+    showPage("verify");
+    const result = document.getElementById("verify-result");
+    result.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdict...</div>`;
+    try {
+      const res = await fetch(`${API}/verdict/${hash}`);
+      const data = await res.json();
+      result.innerHTML = renderVerdictCard(data, true);
+      window.scrollTo(0, 0);
+    } catch(e) {
+      result.innerHTML = `<div class="error-msg">⚠️ Could not load verdict.</div>`;
+    }
+  }
+</script>
+</body>
+</html>

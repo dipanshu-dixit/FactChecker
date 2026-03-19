@@ -60,6 +60,10 @@ GET  /verdicts                # list all past verdicts
 
 Interactive docs: `http://localhost:8000/docs`
 
+## Live Demo
+
+Join the Discord server to see CrawlConda in action: [discord.gg/4hX4f7cu](https://discord.gg/4hX4f7cu)
+
 ## Full Documentation
 
 See [DOCS.md](DOCS.md) for complete setup guide, architecture, all 24 sources, API reference, and troubleshooting.
