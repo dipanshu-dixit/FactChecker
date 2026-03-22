@@ -23,6 +23,21 @@ from crawlconda_swarm import run_swarm, VERDICT_EMOJI
 
 DISCORD_VERIFIED_WEBHOOK = os.getenv("DISCORD_VERIFIED_WEBHOOK", "")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
+WEB_URL = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()  # CLEANED: read once at module level
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+CHROMA_PATH        = os.getenv("CHROMA_PATH", "/app/crawlconda_data")  # CLEANED: Railway volume path
+COL_VERDICTS       = "verified_crawlconda"
+COL_VOTES          = "human_votes"
+TIMEOUT_WEBHOOK    = 10
+TIMEOUT_IPFS_FETCH = 15
+TIMEOUT_PINATA     = 30
+TRENDING_CUTOFF_S  = 86400
+SSE_QUEUE_MAXSIZE  = 32
+SSE_KEEPALIVE_S    = 25
+RATE_LIMIT         = 5
+RATE_WINDOW        = 3600
+CACHE_WINDOW       = 24 * 3600
 
 # Verdict extraction order — check longer strings first to avoid substring matches
 VERDICT_ORDER = [
@@ -41,17 +56,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-chroma = chromadb.PersistentClient(path="./crawlconda_data")
-verdicts_col = chroma.get_or_create_collection("verified_crawlconda")
-votes_col = chroma.get_or_create_collection("human_votes")
+chroma = chromadb.PersistentClient(path=CHROMA_PATH)  # CLEANED: use constant
+verdicts_col = chroma.get_or_create_collection(COL_VERDICTS)  # CLEANED: use constant
+votes_col = chroma.get_or_create_collection(COL_VOTES)  # CLEANED: use constant
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
-_RATE_LIMIT   = 5       # max requests
-_RATE_WINDOW  = 3600    # seconds (1 hour)
 _rate_store: defaultdict[str, list[float]] = defaultdict(list)
-
-# ── Duplicate-claim cache window ───────────────────────────────────────────────
-_CACHE_WINDOW = 24 * 3600  # 24 hours in seconds
 
 # ── SSE broadcast registry ─────────────────────────────────────────────────────
 _sse_clients: list[asyncio.Queue] = []
@@ -77,11 +87,8 @@ async def broadcast(event: dict):
 
 async def post_to_discord_webhook(payload: dict):
     """Send verdict to Discord #verified channel via webhook."""
-    print(f"[WEBHOOK] Called with verdict: {payload.get('verdict', 'UNKNOWN')}")
     if not DISCORD_VERIFIED_WEBHOOK:
-        print("[WEBHOOK] No webhook URL configured")
         return
-    print(f"[WEBHOOK] Webhook URL configured: {DISCORD_VERIFIED_WEBHOOK[:50]}...")
     verdict = payload.get("verdict", "UNCONFIRMED")
     colors = {
         "CONFIRMED":           0x22c55e,
@@ -128,14 +135,13 @@ async def post_to_discord_webhook(payload: dict):
         "timestamp": payload.get("timestamp",""),
     }
     try:
-        print(f"[WEBHOOK] Sending to Discord...")
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 DISCORD_VERIFIED_WEBHOOK,
                 json={"embeds": [embed]},
-                timeout=10
+                timeout=TIMEOUT_WEBHOOK  # CLEANED: use constant
             )
-            print(f"[WEBHOOK] Response status: {resp.status_code}")
+            print(f"[WEBHOOK] {verdict} → {resp.status_code}")  # CLEANED: single log line
     except Exception as e:
         print(f"[WEBHOOK] Failed: {e}")
 
@@ -143,7 +149,7 @@ async def post_to_discord_webhook(payload: dict):
 @app.get("/stream")
 async def stream(request: Request):
     """Server-Sent Events endpoint — real-time verdict push to all web clients."""
-    q: asyncio.Queue = asyncio.Queue(maxsize=32)
+    q: asyncio.Queue = asyncio.Queue(maxsize=SSE_QUEUE_MAXSIZE)  # CLEANED: use constant
     _sse_clients.append(q)
 
     async def generator():
@@ -152,7 +158,7 @@ async def stream(request: Request):
                 if await request.is_disconnected():
                     break
                 try:
-                    event = await asyncio.wait_for(q.get(), timeout=25)
+                    event = await asyncio.wait_for(q.get(), timeout=SSE_KEEPALIVE_S)  # CLEANED: use constant
                     yield {"event": event["type"], "data": json.dumps(event["data"])}
                 except asyncio.TimeoutError:
                     yield {"event": "ping", "data": ""}   # keep-alive heartbeat
@@ -197,13 +203,13 @@ async def verify(claim: str, request: Request):
         "x-forwarded-for", request.client.host
     ).split(",")[0].strip()
     now = time.time()
-    _rate_store[ip] = [t for t in _rate_store[ip] if now - t < _RATE_WINDOW]
+    _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]  # CLEANED: use constant
     # Periodically purge IPs with no recent requests
     if len(_rate_store) > 1000:
         stale = [k for k, v in _rate_store.items() if not v]
         for k in stale:
             del _rate_store[k]
-    if len(_rate_store[ip]) >= _RATE_LIMIT:
+    if len(_rate_store[ip]) >= RATE_LIMIT:  # CLEANED: use constant
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 5 verifications per hour per IP.")
     _rate_store[ip].append(now)
 
@@ -223,15 +229,15 @@ async def verify(claim: str, request: Request):
                 age = now - datetime.fromisoformat(
                     cached_ts.replace("Z", "+00:00")
                 ).timestamp()
-                if age < _CACHE_WINDOW:
+                if age < CACHE_WINDOW:  # CLEANED: use constant
                     votes = votes_col.get(where={"ipfs_hash": doc_id})
                     up   = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
                     down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
                     return {**cached, "ipfs_hash": doc_id,
                             "human_upvotes": up, "human_downvotes": down,
                             "cached": True}
-    except Exception:
-        pass  # cache miss — fall through to full pipeline
+    except Exception as e:
+        print(f"[CACHE] miss — {e}")  # CLEANED: add log to silent except
 
     # ── 4. Full pipeline ───────────────────────────────────────────────────────
     result = await run_swarm(claim)
@@ -281,8 +287,7 @@ async def verify(claim: str, request: Request):
     # log activity
     _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
     # set web_url BEFORE broadcast so SSE clients receive it
-    web_url = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
-    payload["web_url"] = f"{web_url}/#/v/{ipfs_hash}"
+    payload["web_url"] = f"{WEB_URL}/#/v/{ipfs_hash}"  # CLEANED: use module-level constant
     await broadcast({"type": "new_verdict", "data": payload})
     asyncio.create_task(post_to_discord_webhook(payload))
     return payload
@@ -399,7 +404,7 @@ def list_verdicts(limit: int = Query(default=20, le=200)):
 @app.get("/trending")
 def trending():
     """Top 5 verdicts by combined votes in the last 24 hours."""
-    cutoff = datetime.now(tz=timezone.utc).timestamp() - 86400
+    cutoff = datetime.now(tz=timezone.utc).timestamp() - TRENDING_CUTOFF_S  # CLEANED: use constant
     results = verdicts_col.get(limit=500)
     scored = []
     for doc_id, doc, meta in zip(
@@ -443,9 +448,7 @@ def get_activity():
 @app.post("/recover")
 async def recover_from_pinata():
     """Rebuild local ChromaDB index from all pins on Pinata."""
-    import httpx
-    import os
-
+    # CLEANED: removed duplicate imports (httpx, os already at top)
     pinata_jwt = os.getenv("PINATA_JWT")
     if not pinata_jwt:
         raise HTTPException(status_code=500, detail="PINATA_JWT not set")
@@ -454,7 +457,7 @@ async def recover_from_pinata():
         resp = await client.get(
             "https://api.pinata.cloud/data/pinList?status=pinned&pageLimit=1000&metadata[name]=crawlconda",
             headers={"Authorization": f"Bearer {pinata_jwt}"},
-            timeout=30,
+            timeout=TIMEOUT_PINATA,  # CLEANED: use constant
         )
         resp.raise_for_status()
         pins = resp.json().get("rows", [])
@@ -470,7 +473,7 @@ async def recover_from_pinata():
             try:
                 r = await client.get(
                     f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}",
-                    timeout=15
+                    timeout=TIMEOUT_IPFS_FETCH  # CLEANED: use constant
                 )
                 data = r.json()
                 verdicts_col.add(

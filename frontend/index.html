@@ -587,6 +587,14 @@
     ? 'http://localhost:8000'
     : (window.API_URL || 'https://factchecker-production-3945.up.railway.app');
 
+  // CLEANED: VERDICT_ORDER defined once as constant
+  const VERDICT_ORDER = [
+    "PARTIALLY CONFIRMED",
+    "UNCONFIRMED",
+    "CONFIRMED",
+    "FALSE"
+  ];
+
   const EMOJI = {
     "CONFIRMED":           "✅",
     "PARTIALLY CONFIRMED": "🟡",
@@ -685,12 +693,7 @@
   // ── Render helpers ───────────────────────────────────────────────────────────
   function resolveVerdict(raw) {
     const upper = (raw || "").toUpperCase();
-    const VERDICT_ORDER = [
-      "PARTIALLY CONFIRMED",
-      "UNCONFIRMED",
-      "CONFIRMED",
-      "FALSE"
-    ];
+    // CLEANED: use module-level VERDICT_ORDER constant
     return VERDICT_ORDER.find(k => upper.includes(k)) || "UNCONFIRMED";
   }
 

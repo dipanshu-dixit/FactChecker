@@ -12,7 +12,26 @@ import time
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
+from urllib.parse import quote_plus  # CLEANED: moved from inside search_news()
+import requests  # CLEANED: moved from inside ddg_fallback()
+from bs4 import BeautifulSoup  # CLEANED: moved from inside ddg_fallback()
 load_dotenv()
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+# CLEANED: All magic numbers and hardcoded strings extracted as named constants
+MODEL_NAME         = "grok-4-1-fast-reasoning"
+MODEL_BASE_URL     = "https://api.x.ai/v1"
+MODEL_MAX_TOKENS   = 600
+IPFS_GATEWAY       = "https://gateway.pinata.cloud/ipfs/"
+PINATA_PIN_URL     = "https://api.pinata.cloud/pinning/pinJSONToIPFS"
+TIMEOUT_PINATA     = 30
+TIMEOUT_DDG        = 8
+SEARCH_CACHE_TTL   = 300
+SEARCH_CACHE_MAX   = 100
+CHROMA_PATH        = os.getenv("CHROMA_PATH", "/app/crawlconda_data")  # CLEANED: Railway volume path
+COL_VERDICTS       = "verified_crawlconda"
+COL_VOTES          = "human_votes"
+WEB_URL            = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
 
 def _broadcast(data: dict):
     """Push event directly to API broadcast (same process)."""
@@ -45,11 +64,11 @@ def get_llm():
     global _llm
     if _llm is None:
         _llm = ChatOpenAI(
-            model="grok-4-1-fast-reasoning",
+            model=MODEL_NAME,  # CLEANED: use constant
             temperature=0,
             api_key=os.getenv("XAI_API_KEY"),
-            base_url="https://api.x.ai/v1",
-            max_tokens=600,
+            base_url=MODEL_BASE_URL,  # CLEANED: use constant
+            max_tokens=MODEL_MAX_TOKENS,  # CLEANED: use constant
             max_retries=1,
         )
     return _llm
@@ -117,7 +136,7 @@ def log(msg: str):
 
 def search_news(query: str) -> str:
     keywords = [w.lower() for w in query.split() if len(w) > 3]
-    from urllib.parse import quote_plus
+    # CLEANED: quote_plus now imported at top
     google_rss = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
     feeds = [google_rss] + RSS_FEEDS
     hits = []
@@ -155,13 +174,12 @@ def search_news(query: str) -> str:
 
 def ddg_fallback(query: str) -> str:
     try:
-        import requests
-        from bs4 import BeautifulSoup
+        # CLEANED: requests and BeautifulSoup now imported at top
         q = requests.utils.quote(query)
         resp = requests.get(
             f"https://lite.duckduckgo.com/lite/?q={q}",
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-            timeout=8
+            timeout=TIMEOUT_DDG  # CLEANED: use constant
         )
         soup = BeautifulSoup(resp.text, "html.parser")
         results = [a for a in soup.find_all("a", href=True) if a.get("href", "").startswith("http")][:5]
@@ -189,19 +207,17 @@ def expand_query(text: str) -> str:
     )
     return get_llm().invoke(prompt).content.strip()[:200]
 
-_search_cache: dict = {}
-_SEARCH_TTL   = 300  # 5 minutes
-_SEARCH_MAX   = 100
+_search_cache: dict = {}  # CLEANED: TTL and MAX now module-level constants
 
 def cached_search(query: str) -> str:
     now = time.time()
     if query in _search_cache:
         result, ts = _search_cache[query]
-        if now - ts < _SEARCH_TTL:
+        if now - ts < SEARCH_CACHE_TTL:  # CLEANED: use constant
             log(f"[SEARCH_CACHE] Hit for: {query[:50]}")
             return result
     result = search_news(query)
-    if len(_search_cache) >= _SEARCH_MAX:
+    if len(_search_cache) >= SEARCH_CACHE_MAX:  # CLEANED: use constant
         oldest = min(_search_cache, key=lambda k: _search_cache[k][1])
         del _search_cache[oldest]
     _search_cache[query] = (result, now)
@@ -351,27 +367,27 @@ graph.add_edge("Verdict", "Publisher")
 graph.add_edge("Publisher", END)
 swarm = graph.compile()
 
-chroma = chromadb.PersistentClient(path="./crawlconda_data")
-collection = chroma.get_or_create_collection("verified_crawlconda")
+chroma = chromadb.PersistentClient(path=CHROMA_PATH)  # CLEANED: use constant
+collection = chroma.get_or_create_collection(COL_VERDICTS)  # CLEANED: use constant
 
 async def pin_to_ipfs(data: dict) -> str:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+                PINATA_PIN_URL,  # CLEANED: use constant
                 headers={"Authorization": f"Bearer {PINATA_JWT}"},
                 json={"pinataContent": data, "pinataMetadata": {"name": f"crawlconda-{datetime.now(tz=timezone.utc).isoformat()}"}},
-                timeout=30,
+                timeout=TIMEOUT_PINATA,  # CLEANED: use constant
             )
             resp.raise_for_status()
-            return f"https://gateway.pinata.cloud/ipfs/{resp.json()['IpfsHash']}"
+            return f"{IPFS_GATEWAY}{resp.json()['IpfsHash']}"  # CLEANED: use constant
     except Exception as e:
         log(f"[IPFS] Pin failed: {e} — verdict stored locally only")
         import hashlib
         fallback_id = "local_" + hashlib.sha256(
             json.dumps(data, sort_keys=True).encode()
         ).hexdigest()[:40]
-        return f"https://gateway.pinata.cloud/ipfs/{fallback_id}"
+        return f"{IPFS_GATEWAY}{fallback_id}"  # CLEANED: use constant
 
 async def run_swarm(content: str) -> dict:
     result = await swarm.ainvoke({"content": content, "sources": "", "scanned": "", "verdict": "", "published": ""})
@@ -396,10 +412,17 @@ VERDICT_COLOR = {
     "FALSE":               0xef4444,
 }
 
+# CLEANED: VERDICT_ORDER defined once at module level, used everywhere
+VERDICT_ORDER = [
+    "PARTIALLY CONFIRMED",
+    "UNCONFIRMED",
+    "CONFIRMED",
+    "FALSE"
+]
+
 def build_verdict_embed(result: dict) -> discord.Embed:
     published = result["published"][:600]
-    # Verdict extraction order — check longer strings first to avoid substring matches
-    VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
+    # CLEANED: use module-level VERDICT_ORDER constant
     verdict_key = next((k for k in VERDICT_ORDER if k in published.upper()), "UNCONFIRMED")
     emoji       = VERDICT_EMOJI[verdict_key]
     color       = VERDICT_COLOR[verdict_key]
@@ -432,13 +455,12 @@ def build_verdict_embed(result: dict) -> discord.Embed:
         inline=False,
     )
     
-    # Get web URL from environment, strip any whitespace/newlines
-    web_url = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
+    # CLEANED: use module-level WEB_URL constant
     ipfs_hash = result.get("ipfs_hash", result.get("ipfs", "").split("/")[-1])
     
     embed.add_field(
         name="Archived",
-        value=f"[IPFS Record]({result['ipfs']}) · [Web View]({web_url}/#/v/{ipfs_hash})",
+        value=f"[IPFS Record]({result['ipfs']}) · [Web View]({WEB_URL}/#/v/{ipfs_hash})",  # CLEANED: use constant
         inline=False,
     )
     embed.set_footer(text="CrawlConda · Ground Truth Engine")
@@ -447,7 +469,7 @@ def build_verdict_embed(result: dict) -> discord.Embed:
 # message_id → ipfs_hash, tracked for reaction voting
 pending_votes: dict[int, str] = {}
 
-votes_col = chroma.get_or_create_collection("human_votes")
+votes_col = chroma.get_or_create_collection(COL_VOTES)  # CLEANED: use constant
 
 def record_vote(ipfs_hash: str, user_id: str, vote: str):
     vote_id = f"{ipfs_hash}:{user_id}"
@@ -593,7 +615,7 @@ async def verify(ctx, *, text: str):
 
         # SSE broadcast
         verdict_line = next((l for l in raw["published"].splitlines() if "VERDICT" in l.upper()), "")
-        VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
+        # CLEANED: use module-level VERDICT_ORDER constant
         verdict_key  = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
         _broadcast({"type": "new_verdict", "data": {
             "claim": text, "verdict": verdict_key, "emoji": VERDICT_EMOJI[verdict_key],

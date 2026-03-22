@@ -21,6 +21,7 @@ DISCORD_VERIFIED_WEBHOOK=https://discord.com/api/webhooks/...
 INTERNAL_SECRET=any_random_string_here
 WEB_URL=https://your-app.vercel.app
 API_INTERNAL_URL=https://your-railway-service.up.railway.app
+CHROMA_PATH=./crawlconda_data
 ```
 
 **Terminal 1 — API:**
