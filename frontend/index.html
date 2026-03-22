@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CrawlConda — AI Fact Checker</title>
+  <title>CrawlConda — Ground Truth Engine</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -12,6 +12,7 @@
       background: #0d0d0d;
       color: #e8e8e8;
       min-height: 100vh;
+      padding-bottom: 36px;
     }
 
     header {
@@ -44,11 +45,7 @@
     .hero p { color: #888; font-size: 1rem; line-height: 1.6; }
 
     /* SEARCH */
-    .search-box {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
+    .search-box { display: flex; gap: 10px; margin-bottom: 12px; }
     .search-box input {
       flex: 1;
       background: #1a1a1a;
@@ -92,12 +89,7 @@
     .example-chip:hover { border-color: #7c6af7; color: #e8e8e8; }
 
     /* STATUS */
-    .status {
-      text-align: center;
-      padding: 32px;
-      color: #888;
-      font-size: 0.95rem;
-    }
+    .status { text-align: center; padding: 32px; color: #888; font-size: 0.95rem; }
     .spinner {
       width: 32px; height: 32px;
       border: 3px solid #2a2a2a;
@@ -116,28 +108,15 @@
       padding: 28px;
       margin-bottom: 20px;
     }
-    .verdict-card.CONFIRMED { border-left: 4px solid #22c55e; }
-    .verdict-card.PARTIALLY { border-left: 4px solid #eab308; }
-    .verdict-card.UNCONFIRMED { border-left: 4px solid #f97316; }
-    .verdict-card.FALSE { border-left: 4px solid #ef4444; }
+    .verdict-card.CONFIRMED    { border-left: 4px solid #22c55e; }
+    .verdict-card.PARTIALLY    { border-left: 4px solid #eab308; }
+    .verdict-card.UNCONFIRMED  { border-left: 4px solid #f97316; }
+    .verdict-card.FALSE        { border-left: 4px solid #ef4444; }
 
-    .verdict-header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
+    .verdict-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
     .verdict-emoji { font-size: 2rem; }
-    .verdict-label {
-      font-size: 1.1rem;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
-    .verdict-claim {
-      font-size: 0.85rem;
-      color: #666;
-      margin-top: 2px;
-    }
+    .verdict-label { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px; }
+    .verdict-claim { font-size: 0.85rem; color: #666; margin-top: 2px; }
 
     .verdict-summary {
       color: #ccc;
@@ -165,12 +144,7 @@
     }
     .source-item:last-child { border-bottom: none; }
     .source-dot { width: 6px; height: 6px; background: #7c6af7; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-    .source-item a {
-      color: #a89ff7;
-      text-decoration: none;
-      font-size: 0.88rem;
-      line-height: 1.5;
-    }
+    .source-item a { color: #a89ff7; text-decoration: none; font-size: 0.88rem; line-height: 1.5; }
     .source-item a:hover { color: #fff; }
     .source-name { font-size: 0.75rem; color: #555; margin-top: 2px; }
 
@@ -185,30 +159,99 @@
     }
     .vote-label { font-size: 0.85rem; color: #666; margin-right: 4px; }
     .vote-btn {
-      background: #1a1a1a;
-      border: 1px solid #2a2a2a;
-      border-radius: 8px;
-      padding: 8px 16px;
-      font-size: 0.9rem;
-      color: #888;
+      background: transparent;
+      border: 1px solid #252525;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #555;
       cursor: pointer;
-      transition: all 0.2s;
-      display: flex;
+      transition: all 0.15s;
+      display: inline-flex;
       align-items: center;
       gap: 6px;
+      letter-spacing: 0.02em;
     }
-    .vote-btn:hover { border-color: #7c6af7; color: #e8e8e8; background: #1a1a1a; }
-    .vote-btn.active-up { border-color: #22c55e; color: #22c55e; background: #1a1a1a; }
-    .vote-btn.active-down { border-color: #ef4444; color: #ef4444; background: #1a1a1a; }
+    .vote-btn:hover       { border-color: #444; color: #999; background: transparent; }
+    .vote-btn.active-up   { border-color: #22c55e; color: #22c55e; background: transparent; }
+    .vote-btn.active-down { border-color: #ef4444; color: #ef4444; background: transparent; }
     .vote-count { font-size: 0.85rem; font-weight: 600; }
 
-    .ipfs-link {
-      margin-top: 16px;
-      font-size: 0.78rem;
-      color: #444;
-    }
+    /* vote btn bounce on click */
+    .vote-btn.pop { transform: scale(1.12); }
+
+    .ipfs-link { margin-top: 16px; font-size: 0.78rem; color: #444; }
     .ipfs-link a { color: #555; text-decoration: none; }
     .ipfs-link a:hover { color: #888; }
+
+    .share-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #1a1a1a;
+    }
+    .share-btn {
+      background: transparent;
+      border: 1px solid #252525;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      color: #555;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .share-btn:hover { border-color: #444; color: #999; background: transparent; }
+
+    /* TRENDING */
+    .trending-header {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 10px;
+    }
+    .trending-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: #111;
+      border: 1px solid #1e1e1e;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .trending-item:hover { border-color: #333; }
+    .trending-rank {
+      font-size: 0.72rem;
+      color: #333;
+      font-weight: 700;
+      width: 16px;
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .trending-claim {
+      flex: 1;
+      font-size: 0.85rem;
+      color: #999;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .trending-votes {
+      font-size: 0.75rem;
+      color: #444;
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
 
     /* VERDICTS LIST */
     .verdicts-header {
@@ -218,6 +261,22 @@
       margin-bottom: 24px;
     }
     .verdicts-header h2 { font-size: 1.4rem; font-weight: 700; }
+
+    /* live dot shown when SSE is connected */
+    .live-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      margin-left: 8px;
+      animation: pulse 2s ease-in-out infinite;
+      vertical-align: middle;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.8); }
+    }
+
     .refresh-btn {
       background: #1a1a1a;
       border: 1px solid #2a2a2a;
@@ -235,12 +294,21 @@
       padding: 18px 20px;
       margin-bottom: 12px;
       cursor: pointer;
-      transition: border-color 0.2s;
+      transition: border-color 0.2s, opacity 0.3s;
       display: flex;
       align-items: center;
       gap: 16px;
     }
     .verdict-list-item:hover { border-color: #7c6af7; }
+    /* slide-in animation for new SSE verdicts */
+    .verdict-list-item.new-item {
+      animation: slideIn 0.35s ease forwards;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     .list-emoji { font-size: 1.5rem; flex-shrink: 0; }
     .list-content { flex: 1; min-width: 0; }
     .list-claim {
@@ -253,8 +321,37 @@
     }
     .list-meta { font-size: 0.78rem; color: #555; display: flex; gap: 12px; }
     .list-votes { font-size: 0.85rem; color: #666; flex-shrink: 0; text-align: right; }
+    .tally       { font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tally-up    { color: #22c55e; }
+    .tally-down  { color: #ef4444; }
+    .tally-sep   { color: #333; font-size: 0.78rem; margin: 0 3px; }
 
     .empty { text-align: center; padding: 60px 0; color: #555; }
+
+    /* FILTER BAR */
+    #verdict-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .filter-chip {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 0.82rem;
+      color: #666;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-chip:hover,
+    .filter-chip.active { border-color: #7c6af7; color: #e8e8e8; background: #1a1a1a; }
+    .filter-chip[data-filter="CONFIRMED"].active    { border-color: #22c55e; color: #22c55e; }
+    .filter-chip[data-filter="PARTIALLY CONFIRMED"].active { border-color: #eab308; color: #eab308; }
+    .filter-chip[data-filter="UNCONFIRMED"].active  { border-color: #f97316; color: #f97316; }
+    .filter-chip[data-filter="FALSE"].active        { border-color: #ef4444; color: #ef4444; }
+    .filter-chip[data-filter="ALL"].active          { border-color: #7c6af7; color: #7c6af7; }
 
     /* ABOUT */
     .about-section { margin-bottom: 36px; }
@@ -268,13 +365,7 @@
       padding: 20px;
       margin: 16px 0;
     }
-    .pipeline-step {
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
-      padding: 10px 0;
-      border-bottom: 1px solid #1e1e1e;
-    }
+    .pipeline-step { display: flex; align-items: flex-start; gap: 14px; padding: 10px 0; border-bottom: 1px solid #1e1e1e; }
     .pipeline-step:last-child { border-bottom: none; }
     .step-num {
       width: 24px; height: 24px;
@@ -288,12 +379,7 @@
     .step-text strong { color: #e8e8e8; }
 
     .verdict-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-    .verdict-table th, .verdict-table td {
-      padding: 10px 14px;
-      text-align: left;
-      border-bottom: 1px solid #1e1e1e;
-      font-size: 0.88rem;
-    }
+    .verdict-table th, .verdict-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #1e1e1e; font-size: 0.88rem; }
     .verdict-table th { color: #666; font-weight: 600; }
     .verdict-table td { color: #ccc; }
 
@@ -331,6 +417,28 @@
       margin-bottom: 20px;
     }
 
+    /* ACTIVITY BAR */
+    #activity-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: #0a0a0a;
+      border-top: 1px solid #1a1a1a;
+      padding: 8px 24px;
+      font-size: 0.72rem;
+      color: #444;
+      z-index: 100;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    #activity-inner {
+      display: inline-block;
+      animation: ticker 30s linear infinite;
+    }
+    @keyframes ticker {
+      0%   { transform: translateX(100vw); }
+      100% { transform: translateX(-100%); }
+    }
+
     @media (max-width: 600px) {
       header { padding: 14px 16px; }
       .logo { font-size: 1rem; }
@@ -360,7 +468,8 @@
   <div class="logo">Crawl<span>Conda</span></div>
   <nav>
     <a onclick="showPage('verify')">Verify</a>
-    <a onclick="showPage('verdicts')">Verdicts</a>
+    <a onclick="showPage('verdicts')">The Record</a>
+    <a onclick="showPage('trending')">Trending</a>
     <a onclick="showPage('about')">About</a>
   </nav>
 </header>
@@ -368,13 +477,14 @@
 <!-- VERIFY PAGE -->
 <div class="page active" id="page-verify">
   <div class="hero">
-    <h1>AI <span>Fact Checker</span></h1>
-    <p>Enter any claim. CrawlConda searches 24 live news sources and returns a source-grounded verdict — pinned permanently to IPFS.</p>
+    <h1>Ground Truth <span>Engine</span></h1>
+    <p>Submit any claim. CrawlConda searches 24 live sources, runs a 4-node AI pipeline, and returns a source-grounded verdict — pinned permanently to IPFS.</p>
   </div>
 
   <div class="search-box">
-    <input type="text" id="claim-input" placeholder="Enter a claim to fact-check..." onkeydown="if(event.key==='Enter') runVerify()" />
-    <button id="verify-btn" onclick="runVerify()">Verify</button>
+    <input type="text" id="claim-input"
+           onkeydown="if(event.key==='Enter') runVerify()" placeholder="What needs to be verified?" />
+    <button id="verify-btn" onclick="runVerify()">Investigate</button>
   </div>
 
   <div class="examples">
@@ -391,38 +501,54 @@
 <!-- VERDICTS PAGE -->
 <div class="page" id="page-verdicts">
   <div class="verdicts-header">
-    <h2>Past Verdicts</h2>
+    <h2>The Record <span class="live-dot" id="live-dot" title="Live updates connected" style="display:none"></span></h2>
     <button class="refresh-btn" onclick="loadVerdicts()">↻ Refresh</button>
   </div>
+  <div id="verdict-filters">
+    <span class="filter-chip active" data-filter="ALL">All</span>
+    <span class="filter-chip" data-filter="CONFIRMED">Confirmed</span>
+    <span class="filter-chip" data-filter="PARTIALLY CONFIRMED">Partial</span>
+    <span class="filter-chip" data-filter="UNCONFIRMED">Unconfirmed</span>
+    <span class="filter-chip" data-filter="FALSE">False</span>
+  </div>
   <div id="verdicts-list"></div>
+</div>
+
+<!-- TRENDING PAGE -->
+<div class="page" id="page-trending">
+  <div class="verdicts-header">
+    <h2>Trending · 24h</h2>
+    <button class="refresh-btn" onclick="loadTrending()">↻ Refresh</button>
+  </div>
+  <div id="trending-list"></div>
 </div>
 
 <!-- ABOUT PAGE -->
 <div class="page" id="page-about">
   <div class="about-section">
-    <h2>What is CrawlConda</h2>
-    <p>CrawlConda is an AI fact-checking system. Give it any claim — it searches 24 live RSS feeds across world news, business, tech, science, and sport, runs a 4-node AI pipeline, and returns a source-grounded verdict.</p>
-    <p>Every verdict is pinned permanently to IPFS. Humans can confirm or challenge any verdict — votes are stored alongside the AI verdict forever.</p>
+    <h2>Built for Truth</h2>
+    <p>CrawlConda is a source-grounded verification system. Submit any claim and it searches 24 live news feeds, extracts only facts explicitly stated in sources, and issues a verdict — pinned permanently to IPFS.</p>
+    <p>Every result is auditable. Every source is cited. Human votes run alongside every AI verdict, forever.</p>
   </div>
 
   <div class="about-section">
-    <h2>How It Works</h2>
+    <h2>The Pipeline</h2>
     <div class="pipeline">
       <div class="pipeline-step">
         <div class="step-num">1</div>
-        <div class="step-text"><strong>Expander</strong> — converts your claim into optimised RSS search keywords</div>
+        <div class="step-text"><strong>Expand</strong> — claim is decomposed into precision search keywords</div>
       </div>
       <div class="pipeline-step">
         <div class="step-num">2</div>
-        <div class="step-text"><strong>Searcher</strong> — scans all 24 feeds + Google News, ranks by relevance, returns top 8 articles</div>
+        <div class="step-text"><strong>Search</strong> — 24 RSS feeds + Google News scanned, top 8 articles ranked by relevance</div>
       </div>
       <div class="pipeline-step">
         <div class="step-num">3</div>
-        <div class="step-text"><strong>Scanner</strong> — extracts only facts explicitly stated in sources, no outside knowledge</div>
+        <div class="step-text"><strong>Extract</strong> — facts pulled only from source text, no model hallucination permitted</div>
       </div>
       <div class="pipeline-step">
         <div class="step-num">4</div>
-        <div class="step-text"><strong>Verdict</strong> — strict source-grounded verdict with exact headline citation</div>
+        <div class="step-text"><strong>Verify</strong> — verdict issued with exact headline citation and source URL</div>
       </div>
     </div>
   </div>
@@ -431,49 +557,62 @@
     <h2>Verdicts</h2>
     <table class="verdict-table">
       <tr><th>Verdict</th><th>Meaning</th></tr>
-      <tr><td>✅ CONFIRMED</td><td>Sources explicitly report the event</td></tr>
-      <tr><td>🟡 PARTIALLY CONFIRMED</td><td>Sources support part of the claim but not all details</td></tr>
-      <tr><td>⚠️ UNCONFIRMED</td><td>Sources found but none mention the claim</td></tr>
-      <tr><td>❌ FALSE</td><td>Sources explicitly contradict the claim</td></tr>
+      <tr><td><span style="color:#22c55e;font-weight:600">CONFIRMED</span></td><td>Sources explicitly report the event</td></tr>
+      <tr><td><span style="color:#eab308;font-weight:600">PARTIAL</span></td><td>Sources support part of the claim but not all details</td></tr>
+      <tr><td><span style="color:#f97316;font-weight:600">UNCONFIRMED</span></td><td>Sources found but none mention the claim</td></tr>
+      <tr><td><span style="color:#ef4444;font-weight:600">FALSE</span></td><td>Sources explicitly contradict the claim</td></tr>
     </table>
   </div>
 
   <div class="about-section">
     <h2>Open Source & Self-Hostable</h2>
-    <p>CrawlConda is fully open source. Clone the repo, add your own API keys, and run your own instance.</p>
+    <p>The full pipeline is open source. Add your own API keys and run a private instance — air-gapped if needed.</p>
     <p><a href="https://github.com/yourname/crawlconda" style="color:#7c6af7">github.com/yourname/crawlconda</a></p>
   </div>
 
   <div class="discord-banner">
-    <p>See CrawlConda in action on Discord — run <strong>!verify</strong> with any claim.</p>
-    <a href="https://discord.gg/4hX4f7cu" class="discord-btn" target="_blank">Join Discord</a>
+    <p>Run <strong>!verify</strong> in the Discord server. Results sync to this page in real time.</p>
+    <a href="https://discord.gg/4hX4f7cu" class="discord-btn" target="_blank" rel="noopener">Join Discord</a>
   </div>
 </div>
 
+<div id="activity-bar">
+  <span id="activity-inner">Loading activity...</span>
+</div>
+
 <script>
-  const API = "https://api-production-241e.up.railway.app";
+  // Auto-detect API URL based on environment
+  const API = window.location.hostname === 'localhost' || window.location.hostname.includes('github.dev')
+    ? 'https://organic-space-potato-vwj45pw6xxq3pvq9-8000.app.github.dev'
+    : (window.API_URL || 'https://crawlconda-api.up.railway.app');
 
   const EMOJI = {
-    "CONFIRMED": "✅",
+    "CONFIRMED":           "✅",
     "PARTIALLY CONFIRMED": "🟡",
-    "UNCONFIRMED": "⚠️",
-    "FALSE": "❌"
+    "UNCONFIRMED":         "⚠️",
+    "FALSE":               "❌"
   };
 
   const BORDER_CLASS = {
-    "CONFIRMED": "CONFIRMED",
+    "CONFIRMED":           "CONFIRMED",
     "PARTIALLY CONFIRMED": "PARTIALLY",
-    "UNCONFIRMED": "UNCONFIRMED",
-    "FALSE": "FALSE"
+    "UNCONFIRMED":         "UNCONFIRMED",
+    "FALSE":               "FALSE"
   };
 
+  // ── Page navigation ──────────────────────────────────────────────────────────
   function showPage(name) {
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     document.getElementById("page-" + name).classList.add("active");
     if (name === "verdicts") {
       loadVerdicts();
+      // SSE handles live updates — keep poll as fallback at 60s instead of 30s
       clearInterval(window._verdictTimer);
-      window._verdictTimer = setInterval(loadVerdicts, 30000);
+      window._verdictTimer = setInterval(loadVerdicts, 60000);
+    } else if (name === "trending") {
+      loadTrending();
+      clearInterval(window._verdictTimer);
+      window._verdictTimer = setInterval(loadTrending, 60000);
     } else {
       clearInterval(window._verdictTimer);
     }
@@ -492,16 +631,17 @@
     return id;
   }
 
+  // ── Verify ───────────────────────────────────────────────────────────────────
   async function runVerify() {
     const claim = document.getElementById("claim-input").value.trim();
     if (!claim) return;
 
-    const btn = document.getElementById("verify-btn");
+    const btn    = document.getElementById("verify-btn");
     const result = document.getElementById("verify-result");
 
-    btn.disabled = true;
+    btn.disabled    = true;
     btn.textContent = "Verifying...";
-    result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 24 sources and analysing...</div>`;
+    result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 24 sources and analysing…</div>`;
 
     try {
       const res = await fetch(`${API}/verify?claim=${encodeURIComponent(claim)}`);
@@ -512,136 +652,421 @@
       result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
     }
 
-    btn.disabled = false;
+    btn.disabled    = false;
     btn.textContent = "Verify";
   }
 
+  // ── Trending ─────────────────────────────────────────────────────────────────
+  async function loadTrending() {
+    try {
+      const res  = await fetch(`${API}/trending`);
+      const data = await res.json();
+      const list = document.getElementById("trending-list");
+      if (!data.trending?.length) {
+        list.innerHTML = `<div class="empty">No trending verdicts in the last 24 hours.</div>`;
+        return;
+      }
+      list.innerHTML = data.trending.map((v, i) => `
+        <div class="trending-item" data-hash="${v.ipfs_hash}">
+          <div class="trending-rank">${i + 1}</div>
+          <div class="trending-claim">${escHtml(v.claim)}</div>
+          <div class="trending-votes">${v.total_votes} signal${v.total_votes !== 1 ? "s" : ""}</div>
+        </div>`).join("");
+      list.querySelectorAll(".trending-item").forEach(el => {
+        el.addEventListener("click", () => openVerdict(el.dataset.hash));
+      });
+    } catch(_) {
+      const list = document.getElementById("trending-list");
+      list.innerHTML = `<div class="error-msg">⚠️ Could not load trending verdicts.</div>`;
+    }
+  }
+
+  // ── Render helpers ───────────────────────────────────────────────────────────
+  function resolveVerdict(raw) {
+    const upper = (raw || "").toUpperCase();
+    const VERDICT_ORDER = [
+      "PARTIALLY CONFIRMED",
+      "UNCONFIRMED",
+      "CONFIRMED",
+      "FALSE"
+    ];
+    return VERDICT_ORDER.find(k => upper.includes(k)) || "UNCONFIRMED";
+  }
+
+  function safeDate(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+  }
+
   function renderVerdictCard(data, showVote) {
-    const verdict = data.verdict || "UNCONFIRMED";
-    const emoji = data.emoji || EMOJI[verdict] || "🔍";
+    const verdict     = resolveVerdict(data.verdict);
+    const emoji       = data.emoji || EMOJI[verdict] || "🔍";
     const borderClass = BORDER_CLASS[verdict] || "";
-    const summary = (data.summary || "").replace(/^VERDICT:.*\n\n?/i, "").trim();
-    const sources = data.sources || [];
-    const hash = data.ipfs_hash || "";
-    const ipfsUrl = data.ipfs_url || "";
-    const upvotes = data.human_upvotes || 0;
-    const downvotes = data.human_downvotes || 0;
+    const summary     = (data.summary || "").replace(/^VERDICT:.*\n\n?/i, "").trim();
+    const sources     = data.sources || [];
+    const hash        = data.ipfs_hash || "";
+    const ipfsUrl     = data.ipfs_url  || "";
+    const upvotes     = data.human_upvotes   || 0;
+    const downvotes   = data.human_downvotes || 0;
 
     const sourcesHtml = sources.slice(0, 5).map(s => `
       <div class="source-item">
         <div class="source-dot"></div>
         <div>
-          <a href="${s.url}" target="_blank" rel="noopener">${s.title}</a>
-          <div class="source-name">${s.source}</div>
+          <a href="${escHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escHtml(s.title)}</a>
+          <div class="source-name">${escHtml(s.source)}</div>
         </div>
-      </div>
-    `).join("");
+      </div>`).join("");
+
+    // Check if user already voted on this verdict
+    const priorVote = localStorage.getItem(`vote_${hash}`);
+    const upClass   = priorVote === "up"   ? " active-up"   : "";
+    const downClass = priorVote === "down" ? " active-down" : "";
 
     const voteHtml = showVote && hash ? `
       <div class="vote-row">
-        <span class="vote-label">Was this verdict accurate?</span>
-        <button class="vote-btn" id="btn-up-${hash}" onclick="castVote('${hash}', 'up')">
-          👍 <span class="vote-count" id="up-${hash}">${upvotes}</span>
+        <button class="vote-btn${upClass}" id="btn-up-${hash}"
+                onclick="castVote('${hash}','up')">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M6 1L11 10H1L6 1Z" stroke="currentColor" stroke-width="1.5" 
+                  stroke-linejoin="round"/>
+          </svg>
+          <span class="vote-count" id="up-${hash}">${upvotes}</span>
         </button>
-        <button class="vote-btn" id="btn-down-${hash}" onclick="castVote('${hash}', 'down')">
-          👎 <span class="vote-count" id="down-${hash}">${downvotes}</span>
+        <button class="vote-btn${downClass}" id="btn-down-${hash}"
+                onclick="castVote('${hash}','down')">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M6 11L1 2H11L6 11Z" stroke="currentColor" stroke-width="1.5" 
+                  stroke-linejoin="round"/>
+          </svg>
+          <span class="vote-count" id="down-${hash}">${downvotes}</span>
         </button>
-      </div>
-    ` : "";
+      </div>` : "";
 
     const ipfsHtml = ipfsUrl ? `
       <div class="ipfs-link">
-        🌐 Permanent record: <a href="${ipfsUrl}" target="_blank">${hash.slice(0, 20)}...</a>
-      </div>
-    ` : "";
+        🌐 Archived to IPFS:
+        <a href="${escHtml(ipfsUrl)}" target="_blank" rel="noopener noreferrer">${escHtml(hash.slice(0, 20))}…</a>
+      </div>` : "";
+
+    const shareHtml = hash ? `
+      <div class="share-row">
+        <button class="share-btn" onclick="copyShare('${hash}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+            <path d="M8 12H16M12 8L16 12L12 16" stroke="currentColor" 
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12C21 
+                     16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12Z" 
+                  stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          Copy link
+        </button>
+        <span class="share-confirm" id="share-confirm-${hash}" 
+              style="display:none;color:#22c55e;font-size:0.78rem">
+          Copied
+        </span>
+      </div>` : "";
 
     return `
       <div class="verdict-card ${borderClass}">
         <div class="verdict-header">
           <div class="verdict-emoji">${emoji}</div>
           <div>
-            <div class="verdict-label">${verdict}</div>
-            <div class="verdict-claim">${data.claim || ""}</div>
+            <div class="verdict-label">${escHtml(verdict)}</div>
+            <div class="verdict-claim">${escHtml(data.claim || "")}</div>
           </div>
         </div>
-        <div class="verdict-summary">${summary}</div>
+        <div class="verdict-summary">${escHtml(summary)}</div>
         ${sources.length ? `<div class="sources-title">Sources</div>${sourcesHtml}` : ""}
         ${voteHtml}
         ${ipfsHtml}
-      </div>
-    `;
+        ${shareHtml}
+      </div>`;
   }
 
+  // Basic XSS guard for user-supplied strings rendered as text
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // ── Vote — optimistic update (instant UI, reconcile in background) ───────────
   async function castVote(hash, vote) {
-    const userId = getUserId();
+    const priorVote = localStorage.getItem(`vote_${hash}`);
+    if (priorVote === vote) return; // already voted this way
+
+    const userId  = getUserId();
+    const upEl    = document.getElementById(`up-${hash}`);
+    const downEl  = document.getElementById(`down-${hash}`);
+    const upBtn   = document.getElementById(`btn-up-${hash}`);
+    const downBtn = document.getElementById(`btn-down-${hash}`);
+
+    if (!upEl || !downEl) return;
+
+    const wasUp   = upBtn.classList.contains("active-up");
+    const wasDown = downBtn.classList.contains("active-down");
+
+    // Instant UI feedback
+    if (vote === "up") {
+      if (!wasUp)   upEl.textContent   = +upEl.textContent + 1;
+      if (wasDown)  downEl.textContent = Math.max(0, +downEl.textContent - 1);
+    } else {
+      if (!wasDown) downEl.textContent = +downEl.textContent + 1;
+      if (wasUp)    upEl.textContent   = Math.max(0, +upEl.textContent - 1);
+    }
+    upBtn.className   = "vote-btn" + (vote === "up"   ? " active-up"   : "");
+    downBtn.className = "vote-btn" + (vote === "down" ? " active-down" : "");
+    localStorage.setItem(`vote_${hash}`, vote);
+
+    // Micro-animation
+    const activeBtn = vote === "up" ? upBtn : downBtn;
+    activeBtn.classList.add("pop");
+    setTimeout(() => activeBtn.classList.remove("pop"), 150);
+
+    // Background POST + reconcile true server counts
     try {
       await fetch(`${API}/confirm/${hash}`, {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vote, user_id: userId })
+        body:    JSON.stringify({ vote, user_id: userId })
       });
-      const r = await fetch(`${API}/verdict/${hash}`);
+      const r    = await fetch(`${API}/verdict/${hash}`);
       const data = await r.json();
-      document.getElementById(`up-${hash}`).textContent = data.human_upvotes || 0;
-      document.getElementById(`down-${hash}`).textContent = data.human_downvotes || 0;
-      document.getElementById(`btn-up-${hash}`).className = "vote-btn" + (vote === "up" ? " active-up" : "");
-      document.getElementById(`btn-down-${hash}`).className = "vote-btn" + (vote === "down" ? " active-down" : "");
-    } catch(e) {}
+      if (upEl)   upEl.textContent   = data.human_upvotes   || 0;
+      if (downEl) downEl.textContent = data.human_downvotes || 0;
+    } catch (e) {
+      // optimistic values remain visible — no rollback needed for votes
+    }
   }
 
+  // ── Filter state ─────────────────────────────────────────────────────────────
+  window._allVerdicts  = [];
+  window._activeFilter = "ALL";
+
+  const FILTER_LABELS = {
+    "CONFIRMED":           "Confirmed",
+    "PARTIALLY CONFIRMED": "Partial",
+    "UNCONFIRMED":         "Unconfirmed",
+    "FALSE":               "False",
+  };
+
+  function applyFilter() {
+    const list    = document.getElementById("verdicts-list");
+    const f       = window._activeFilter;
+    const matched = f === "ALL"
+      ? window._allVerdicts
+      : window._allVerdicts.filter(v => resolveVerdict(v.verdict) === f);
+
+    if (!matched.length) {
+      const label = f === "ALL" ? "" : FILTER_LABELS[f];
+      list.innerHTML = `<div class="empty">No${label ? " " + label : ""} verdicts yet.</div>`;
+      return;
+    }
+    list.innerHTML = matched.map(v => buildListItem(v)).join("");
+  }
+
+  function updateChipCounts() {
+    document.querySelectorAll(".filter-chip").forEach(chip => {
+      const f     = chip.dataset.filter;
+      const count = f === "ALL"
+        ? window._allVerdicts.length
+        : window._allVerdicts.filter(v => resolveVerdict(v.verdict) === f).length;
+      const base  = chip.textContent.replace(/\s*\(\d+\)$/, "");
+      chip.textContent = count > 0 ? `${base} (${count})` : base;
+    });
+  }
+
+  document.getElementById("verdict-filters").addEventListener("click", e => {
+    const chip = e.target.closest(".filter-chip");
+    if (!chip) return;
+    document.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    window._activeFilter = chip.dataset.filter;
+    applyFilter();
+  });
+
+  // ── Verdicts list ────────────────────────────────────────────────────────────
   async function loadVerdicts() {
     const list = document.getElementById("verdicts-list");
-    list.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdicts...</div>`;
+    list.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdicts…</div>`;
     try {
-      const res = await fetch(`${API}/verdicts?limit=50`);
-      const data = await res.json();
-      const items = (data.verdicts || []).slice().reverse();
-      if (!items.length) {
+      const res   = await fetch(`${API}/verdicts?limit=50`);
+      const data  = await res.json();
+      window._allVerdicts = (data.verdicts || []).slice().reverse();
+      if (!window._allVerdicts.length) {
         list.innerHTML = `<div class="empty">No verdicts yet. Be the first to verify a claim.</div>`;
         return;
       }
-      list.innerHTML = items.map(v => {
-        const raw = v.verdict || "UNCONFIRMED";
-        const verdict = Object.keys(EMOJI).find(k => raw.toUpperCase().includes(k)) || "UNCONFIRMED";
-        const emoji = EMOJI[verdict] || "🔍";
-        const claim = v.claim || v.content || "Unknown claim";
-        const hash = v.ipfs_hash || v.id || "";
-        const up = v.human_upvotes || 0;
-        const down = v.human_downvotes || 0;
-        const date = v.timestamp || v.id ? new Date(v.timestamp || v.id).toLocaleDateString() : "";
-        return `
-          <div class="verdict-list-item" onclick="openVerdict('${hash}')">
-            <div class="list-emoji">${emoji}</div>
-            <div class="list-content">
-              <div class="list-claim">${claim}</div>
-              <div class="list-meta">
-                <span>${verdict}</span>
-                ${date ? `<span>${date}</span>` : ""}
-              </div>
-            </div>
-            <div class="list-votes">👍 ${up} 👎 ${down}</div>
-          </div>
-        `;
-      }).join("");
-    } catch(e) {
+      updateChipCounts();
+      applyFilter();
+    } catch (e) {
       list.innerHTML = `<div class="error-msg">⚠️ Could not load verdicts.</div>`;
     }
   }
 
+  function buildListItem(v, isNew = false) {
+    const verdict = resolveVerdict(v.verdict);
+    const emoji   = EMOJI[verdict] || "🔍";
+    const claim   = escHtml(v.claim || v.content || "Unknown claim");
+    // FIX: only parse v.timestamp — never try to parse the IPFS hash as a date
+    const date    = safeDate(v.timestamp);
+    const hash    = escHtml(v.ipfs_hash || v.id || "");
+    const up      = v.human_upvotes   || 0;
+    const down    = v.human_downvotes || 0;
+    return `
+      <div class="verdict-list-item${isNew ? " new-item" : ""}" data-hash="${hash}">
+        <div class="list-emoji">${emoji}</div>
+        <div class="list-content">
+          <div class="list-claim">${claim}</div>
+          <div class="list-meta">
+            <span>${verdict}</span>
+            ${date ? `<span>${date}</span>` : ""}
+          </div>
+        </div>
+        <div class="list-votes">
+          <span class="tally tally-up">${up}</span>
+          <span class="tally-sep">/</span>
+          <span class="tally tally-down">${down}</span>
+        </div>
+      </div>`;
+  }
+
+  // FIX: delegated click — no inline string interpolation of the hash
+  document.getElementById("verdicts-list").addEventListener("click", e => {
+    const item = e.target.closest(".verdict-list-item");
+    if (item && item.dataset.hash) openVerdict(item.dataset.hash);
+  });
+
+  // ── Open single verdict ──────────────────────────────────────────────────────
   async function openVerdict(hash) {
     if (!hash) return;
     showPage("verify");
     const result = document.getElementById("verify-result");
-    result.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdict...</div>`;
+    result.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdict…</div>`;
     try {
-      const res = await fetch(`${API}/verdict/${hash}`);
+      const res  = await fetch(`${API}/verdict/${encodeURIComponent(hash)}`);
+      if (!res.ok) throw new Error(res.status);
       const data = await res.json();
       result.innerHTML = renderVerdictCard(data, true);
-      window.scrollTo(0, 0);
-    } catch(e) {
+      history.replaceState(null, "", `#/v/${hash}`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
       result.innerHTML = `<div class="error-msg">⚠️ Could not load verdict.</div>`;
     }
   }
+
+  // ── Share ────────────────────────────────────────────────────────────────────
+  function copyShare(hash) {
+    const url = `${window.location.origin}${window.location.pathname}#/v/${hash}`;
+    navigator.clipboard.writeText(url).then(() => {
+      const el = document.getElementById(`share-confirm-${hash}`);
+      if (el) {
+        el.style.display = "inline";
+        setTimeout(() => el.style.display = "none", 2000);
+      }
+    });
+  }
+
+  // ── Router ───────────────────────────────────────────────────────────────────
+  function router() {
+    const hash = window.location.hash;
+    const match = hash.match(/^#\/v\/([A-Za-z0-9]+)$/);
+    if (match) {
+      openVerdict(match[1]);
+    }
+  }
+  window.addEventListener("hashchange", router);
+  document.addEventListener("DOMContentLoaded", router);
+
+  // ── SSE — real-time sync (Discord → web, web → web) ─────────────────────────
+  function connectSSE() {
+    const es = new EventSource(`${API}/stream`);
+
+    es.addEventListener("open", () => {
+      document.getElementById("live-dot").style.display = "inline-block";
+    });
+
+    es.addEventListener("new_verdict", e => {
+      try {
+        const data = JSON.parse(e.data);
+        // prepend to global store
+        window._allVerdicts.unshift(data);
+        updateChipCounts();
+        // inject into list only if verdicts page is active and not mid-load
+        const list = document.getElementById("verdicts-list");
+        const onVerdicts = document.getElementById("page-verdicts").classList.contains("active");
+        if (onVerdicts && list && !list.querySelector(".status")) {
+          const f = window._activeFilter;
+          if (f === "ALL" || resolveVerdict(data.verdict) === f) {
+            list.insertAdjacentHTML("afterbegin", buildListItem(data, true));
+          }
+        }
+        updateActivityBar();
+      } catch (_) {}
+    });
+
+    es.addEventListener("vote_update", e => {
+      try {
+        const d = JSON.parse(e.data);
+        const h = d.ipfs_hash;
+        // update vote counts on any open verdict card
+        const upEl   = document.getElementById(`up-${h}`);
+        const downEl = document.getElementById(`down-${h}`);
+        if (upEl)   upEl.textContent   = d.human_upvotes;
+        if (downEl) downEl.textContent = d.human_downvotes;
+        // update tally in The Record list
+        const card = document.querySelector(
+            `.verdict-list-item[data-hash="${h}"] .tally-up`);
+        const cardDown = document.querySelector(
+            `.verdict-list-item[data-hash="${h}"] .tally-down`);
+        if (card)     card.textContent     = d.human_upvotes;
+        if (cardDown) cardDown.textContent = d.human_downvotes;
+        updateActivityBar();
+      } catch(_) {}
+    });
+
+    es.addEventListener("activity_update", e => {
+      updateActivityBar();
+    });
+
+    es.onerror = () => {
+      document.getElementById("live-dot").style.display = "none";
+      // exponential back-off capped at 15s
+      const delay = Math.min((connectSSE._retry || 1) * 2000, 15000);
+      connectSSE._retry = (connectSSE._retry || 1) + 1;
+      setTimeout(() => {
+        connectSSE._retry = 1;
+        connectSSE();
+      }, delay);
+    };
+  }
+
+  connectSSE();
+
+  // ── Activity bar ──────────────────────────────────────────────────────────────────
+  async function updateActivityBar() {
+    try {
+      const res = await fetch(`${API}/activity`);
+      const data = await res.json();
+      const events = data.events || [];
+      const text = events.map(e => {
+        if (e.type === "verify") 
+          return `${e.verdict} — "${e.claim}"`;
+        if (e.type === "vote")   
+          return `${e.vote === "up" ? "↑" : "↓"} vote on record`;
+        return "";
+      }).filter(Boolean).join("   ·   ");
+      document.getElementById("activity-inner").textContent = 
+        text || "No activity yet";
+    } catch(_) {}
+  }
+
+  updateActivityBar();
+  setInterval(updateActivityBar, 30000);
 </script>
 </body>
 </html>

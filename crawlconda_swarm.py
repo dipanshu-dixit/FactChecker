@@ -1,7 +1,6 @@
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from typing import TypedDict
-from functools import lru_cache
 import discord
 from discord.ext import commands
 import asyncio
@@ -15,8 +14,20 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+# Lazy import — only resolves when both processes share the same runtime (Railway)
+def _broadcast(data: dict):
+    try:
+        from api import broadcast as _b
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_b(data))
+    except Exception:
+        pass
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+VERIFIED_CHANNEL_ID = int(os.getenv("VERIFIED_CHANNEL_ID", "0"))
 PINATA_JWT = os.getenv("PINATA_JWT")
 
 llm = ChatOpenAI(
@@ -157,9 +168,19 @@ def expand_query(text: str) -> str:
     )
     return llm.invoke(prompt).content.strip()[:200]
 
-@lru_cache(maxsize=64)
+_search_cache: dict = {}
+_SEARCH_TTL = 300  # 5 minutes
+
 def cached_search(query: str) -> str:
-    return search_news(query)
+    now = time.time()
+    if query in _search_cache:
+        result, ts = _search_cache[query]
+        if now - ts < _SEARCH_TTL:
+            log(f"[SEARCH_CACHE] Hit for: {query[:50]}")
+            return result
+    result = search_news(query)
+    _search_cache[query] = (result, now)
+    return result
 
 def searcher_node(state: State):
     log("[SEARCHER] Expanding query with LLM")
@@ -171,12 +192,46 @@ def searcher_node(state: State):
         ddg = ddg_fallback(expanded)
         if ddg:
             sources = ddg
+    
+    # Count real sources
+    real = [s for s in sources.split("|||") 
+            if len(s.split("||")) >= 3 
+            and s.split("||")[1].strip().startswith("http")]
+    
+    # Retry with simplified 2-3 keyword query if weak results
+    if len(real) < 2:
+        log("[SEARCHER] Weak results — retrying with simplified query")
+        # Extract just the key nouns from expanded query
+        simple_prompt = (
+            f"Extract only the 2-3 most important nouns or names "
+            f"from this query as a search string. Return ONLY the "
+            f"words, nothing else.\nQuery: {expanded}"
+        )
+        simple_query = llm.invoke(simple_prompt).content.strip()[:100]
+        log(f"[SEARCHER] Simplified query: {simple_query}")
+        retry_sources = search_news(simple_query)
+        retry_real = [s for s in retry_sources.split("|||")
+                      if len(s.split("||")) >= 3
+                      and s.split("||")[1].strip().startswith("http")]
+        if len(retry_real) > len(real):
+            sources = retry_sources
+            log(f"[SEARCHER] Retry found {len(retry_real)} sources")
+    
     count = len(sources.split("|||")) if "|||" in sources else 0
     log(f"[SEARCHER] Done — {count} sources collected")
     return {"sources": sources}
 
 def scanner_node(state: State):
     log("[SCANNER] Extracting key facts")
+    sources = state.get("sources", "")
+    real_sources = [
+        s for s in sources.split("|||")
+        if len(s.split("||")) >= 3
+        and s.split("||")[0].strip()
+    ]
+    if not real_sources:
+        log("[SCANNER] No sources to scan")
+        return {"scanned": "No sources were found for this claim."}
     plain = sources_for_llm(state["sources"])
     prompt = (
         f"Claim: {state['content'][:300]}\n\n"
@@ -191,23 +246,54 @@ def scanner_node(state: State):
 
 def verdict_node(state: State):
     log("[VERDICT] Analysing facts")
+    sources = state.get("sources", "")
+    real_sources = [
+        s for s in sources.split("|||")
+        if len(s.split("||")) >= 3
+        and s.split("||")[0].strip()
+        and s.split("||")[1].strip().startswith("http")
+    ]
+    if not real_sources:
+        log("[VERDICT] No real sources found — returning UNCONFIRMED")
+        return {
+            "verdict": (
+                "VERDICT: UNCONFIRMED\n\n"
+                "REASONING: No sources were located across 24 monitored feeds "
+                "for this claim. Cannot confirm or deny without source material.\n"
+                "KEY SOURCE: None"
+            )
+        }
     plain = sources_for_llm(state["sources"])
     prompt = (
-        f"You are a strict news fact-checker. Your ONLY job is to check if the claim is supported by the sources.\n\n"
+        f"You are a strict evidence-based fact-checker. "
+        f"Your only job is to determine if the SPECIFIC claim is "
+        f"directly answered by the sources provided.\n\n"
         f"Claim: {state['content'][:300]}\n\n"
         f"Facts extracted from sources:\n{state['scanned'][:800]}\n\n"
         f"Full sources:\n{plain[:2500]}\n\n"
-        f"Rules:\n"
-        f"- If sources explicitly report the event, attack, or situation described in the claim → CONFIRMED\n"
-        f"- If sources partially support the claim but key details differ → PARTIALLY CONFIRMED\n"
-        f"- If sources exist but do NOT mention the claim at all → UNCONFIRMED\n"
-        f"- If sources explicitly contradict the claim → FALSE\n"
-        f"- NEVER say unconfirmed just because you personally doubt it. Go by what the sources say.\n"
-        f"- Quote the exact headline that supports your verdict.\n\n"
+        f"STRICT RULES — read carefully:\n"
+        f"- CONFIRMED: Sources contain explicit, direct evidence that "
+        f"the specific claim is true. The claim must be answerable "
+        f"YES from the sources. Related topic coverage is NOT enough.\n"
+        f"- PARTIALLY CONFIRMED: Sources directly address part of the "
+        f"claim but leave key parts unanswered or uncertain.\n"
+        f"- UNCONFIRMED: Sources exist on the topic but do NOT directly "
+        f"answer or address the specific claim being made. "
+        f"This is the correct verdict when sources discuss a related "
+        f"topic but do not confirm the specific assertion.\n"
+        f"- FALSE: Sources explicitly and directly contradict the claim.\n\n"
+        f"CRITICAL: Ask yourself — do the sources DIRECTLY answer this "
+        f"exact claim? If sources only cover a related topic without "
+        f"directly confirming the specific assertion, verdict is "
+        f"UNCONFIRMED, not CONFIRMED.\n\n"
+        f"Example: Claim='Is Israel stopping the Iran war' + sources "
+        f"about Iran war existing = UNCONFIRMED. Sources talk about "
+        f"the topic but do not answer whether Israel is stopping it.\n\n"
         f"Respond in exactly this format:\n"
         f"VERDICT: [CONFIRMED / PARTIALLY CONFIRMED / UNCONFIRMED / FALSE]\n"
-        f"REASONING: [1-2 sentences citing the source headline]\n"
-        f"KEY SOURCE: [exact headline]"
+        f"REASONING: [1-2 sentences. Must cite what the source "
+        f"specifically says or does NOT say about the claim.]\n"
+        f"KEY SOURCE: [exact headline, or 'None' if no direct source]"
     )
     verdict = llm.invoke(prompt).content[:600]
     log(f"[VERDICT] → {verdict[:120]}")
@@ -217,10 +303,11 @@ def publisher_node(state: State):
     log("[PUBLISHER] Formatting final signal")
     prompt = (
         f"{state['verdict'][:600]}\n\n"
-        f"Rewrite the above into a clean Discord message with exactly:\n"
-        f"Line 1: VERDICT: [CONFIRMED / PARTIALLY CONFIRMED / UNCONFIRMED / FALSE]\n"
-        f"Line 2: empty\n"
-        f"Line 3: Reasoning in 2 sentences max, citing the source.\n"
+        f"Rewrite the REASONING section above into 2 clean sentences "
+        f"that explain what the sources DO and DO NOT say about the claim. "
+        f"Be specific — name what evidence exists and what is missing.\n"
+        f"Start directly with the explanation, no preamble.\n"
+        f"Do not include the VERDICT line or KEY SOURCE line.\n"
         f"Nothing else."
     )
     published = llm.invoke(prompt).content[:600]
@@ -258,29 +345,78 @@ async def run_swarm(content: str) -> dict:
     result["ipfs"] = await pin_to_ipfs(result)
     doc_id = result["ipfs"].split("/")[-1]
     collection.add(documents=[json.dumps(result)], ids=[doc_id])
+    # Push to SSE clients so web frontend updates in real time
+    verdict_line = next((l for l in result["published"].splitlines() if "VERDICT" in l.upper()), "")
+    # Verdict extraction order — check longer strings first to avoid substring matches
+    VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
+    verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+    _broadcast({"type": "new_verdict", "data": {
+        "claim": content,
+        "verdict": verdict_key,
+        "emoji": VERDICT_EMOJI[verdict_key],
+        "summary": result["published"],
+        "ipfs_hash": doc_id,
+        "ipfs_url": result["ipfs"],
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+    }})
+    # Auto-post to #verified channel
+    asyncio.create_task(post_to_verified_channel({
+        **result,
+        "ipfs_hash": doc_id,
+        "ipfs":      result["ipfs"],
+    }))
     return result
 
 VERDICT_EMOJI = {"CONFIRMED": "✅", "PARTIALLY CONFIRMED": "🟡", "UNCONFIRMED": "⚠️", "FALSE": "❌"}
 
-def format_discord_msg(result: dict) -> str:
+VERDICT_COLOR = {
+    "CONFIRMED":           0x22c55e,
+    "PARTIALLY CONFIRMED": 0xeab308,
+    "UNCONFIRMED":         0xf97316,
+    "FALSE":               0xef4444,
+}
+
+def build_verdict_embed(result: dict) -> discord.Embed:
     published = result["published"][:600]
-    emoji = next((v for k, v in VERDICT_EMOJI.items() if k in published.upper()), "🔍")
+    # Verdict extraction order — check longer strings first to avoid substring matches
+    VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
+    verdict_key = next((k for k in VERDICT_ORDER if k in published.upper()), "UNCONFIRMED")
+    emoji       = VERDICT_EMOJI[verdict_key]
+    color       = VERDICT_COLOR[verdict_key]
+
+    # Strip the "VERDICT: ..." header line — keep only the 2-sentence summary
+    summary_lines = [l for l in published.splitlines() if "VERDICT:" not in l.upper()]
+    summary = " ".join(summary_lines).strip()[:500]
+
+    embed = discord.Embed(
+        title=f"{emoji}  {verdict_key}",
+        description=summary,
+        color=color,
+        timestamp=datetime.utcnow(),
+    )
+    embed.add_field(name="Claim", value=result.get("content", "")[:300], inline=False)
+
+    # Top 3 sources as a numbered list
     source_lines = []
     if "|||" in result["sources"]:
         for entry in result["sources"].split("|||")[:3]:
             parts = entry.split("||")
             if len(parts) >= 3:
-                title, link, src = parts[0].strip(), parts[1].strip(), parts[2].strip()
+                title, link = parts[0].strip()[:80], parts[1].strip()
                 if title and link:
-                    source_lines.append(f"• [{title[:80]}]({link}) — {src}")
-    sources_block = "\n".join(source_lines) if source_lines else "⚠️ No sources matched."
-    ipfs_hash = result['ipfs'].split('/')[-1]
-    return (
-        f"## {emoji} CrawlConda Verdict\n"
-        f"{published}\n\n"
-        f"**Sources ({len(source_lines)}):**\n{sources_block}\n\n"
-        f"🌐 [IPFS Audit Record]({result['ipfs']}) `{ipfs_hash[:16]}...`"
+                    source_lines.append(f"{len(source_lines)+1}. [{title}]({link})")
+    embed.add_field(
+        name="Sources",
+        value="\n".join(source_lines) if source_lines else "No sources matched.",
+        inline=False,
     )
+    embed.add_field(
+        name="Archived",
+        value=f"[View permanent record →]({result['ipfs']})",
+        inline=False,
+    )
+    embed.set_footer(text="CrawlConda · Ground Truth Engine")
+    return embed
 
 # message_id → ipfs_hash, tracked for reaction voting
 pending_votes: dict[int, str] = {}
@@ -291,10 +427,61 @@ def record_vote(ipfs_hash: str, user_id: str, vote: str):
     vote_id = f"{ipfs_hash}:{user_id}"
     existing = votes_col.get(ids=[vote_id])
     if existing["ids"]:
-        votes_col.update(ids=[vote_id], documents=[vote], metadatas=[{"ipfs_hash": ipfs_hash, "user_id": user_id, "vote": vote}])
+        votes_col.update(
+            ids=[vote_id], 
+            documents=[vote], 
+            metadatas=[{"ipfs_hash": ipfs_hash, 
+                        "user_id": user_id, "vote": vote}]
+        )
     else:
-        votes_col.add(ids=[vote_id], documents=[vote], metadatas=[{"ipfs_hash": ipfs_hash, "user_id": user_id, "vote": vote}])
+        votes_col.add(
+            ids=[vote_id], 
+            documents=[vote], 
+            metadatas=[{"ipfs_hash": ipfs_hash, 
+                        "user_id": user_id, "vote": vote}]
+        )
     log(f"[VOTE] {vote} on {ipfs_hash[:16]}... by {user_id}")
+    # recalculate totals and broadcast to all web clients
+    all_votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
+    up   = sum(1 for v in all_votes["metadatas"] if v["vote"] == "up")
+    down = sum(1 for v in all_votes["metadatas"] if v["vote"] == "down")
+    _broadcast({
+        "type": "vote_update",
+        "data": {
+            "ipfs_hash": ipfs_hash,
+            "human_upvotes":   up,
+            "human_downvotes": down,
+            "source": "discord"
+        }
+    })
+    _broadcast({
+        "type": "activity_update", 
+        "data": {
+            "type": "vote",
+            "ipfs_hash": ipfs_hash,
+            "vote": vote,
+            "source": "discord",
+            "ts": datetime.now(tz=timezone.utc).isoformat()
+        }
+    })
+
+async def post_to_verified_channel(result: dict):
+    """Post every verdict to the public #verified channel."""
+    if not VERIFIED_CHANNEL_ID:
+        return
+    try:
+        channel = bot.get_channel(VERIFIED_CHANNEL_ID)
+        if not channel:
+            channel = await bot.fetch_channel(VERIFIED_CHANNEL_ID)
+        embed = build_verdict_embed(result)
+        msg   = await channel.send(embed=embed)
+        # enable voting reactions on auto-posts too
+        await msg.add_reaction("👍")
+        await msg.add_reaction("👎")
+        pending_votes[msg.id] = result.get("ipfs_hash", 
+            result.get("ipfs","").split("/")[-1])
+    except Exception as e:
+        log(f"[VERIFIED_CHANNEL] Failed to post: {e}")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -321,16 +508,75 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 @bot.command()
 async def verify(ctx, *, text: str):
     log(f"[REQUEST] '{text[:80]}' from {ctx.author} in #{ctx.channel}")
-    status = await ctx.send("🔍 **Searching** 7 sources...")
+    status = await ctx.send("🔍  Expanding query...")
     try:
-        result = await run_swarm(text)
-        await status.edit(content="📌 **Pinning** to IPFS...")
-        log(f"[DONE] IPFS: {result['ipfs'].split('/')[-1]}")
-        await status.edit(content=format_discord_msg(result))
-        ipfs_hash = result["ipfs"].split("/")[-1]
-        pending_votes[status.id] = ipfs_hash
-        await status.add_reaction("👍")
-        await status.add_reaction("👎")
+        # Stage labels mirror the LangGraph pipeline nodes
+        async def update(msg): await status.edit(content=msg)
+
+        # Patch each node to emit a stage update before it runs
+        _orig_searcher = searcher_node
+        _orig_scanner  = scanner_node
+        _orig_verdict  = verdict_node
+        _orig_publisher = publisher_node
+
+        async def _patched_searcher(state):
+            await update("📡  Scanning 24 sources...")
+            return _orig_searcher(state)
+        async def _patched_scanner(state):
+            await update("🧠  Extracting facts...")
+            return _orig_scanner(state)
+        async def _patched_verdict(state):
+            await update("⚖️  Issuing verdict...")
+            return _orig_verdict(state)
+
+        # Build a one-shot patched graph for this invocation
+        from langgraph.graph import StateGraph, END as _END
+        g = StateGraph(State)
+        g.add_node("Searcher",  _patched_searcher)
+        g.add_node("Scanner",   _patched_scanner)
+        g.add_node("Verdict",   _patched_verdict)
+        g.add_node("Publisher", _orig_publisher)
+        g.set_entry_point("Searcher")
+        g.add_edge("Searcher", "Scanner")
+        g.add_edge("Scanner",  "Verdict")
+        g.add_edge("Verdict",  "Publisher")
+        g.add_edge("Publisher", _END)
+        patched_swarm = g.compile()
+
+        raw = await patched_swarm.ainvoke(
+            {"content": text, "sources": "", "scanned": "", "verdict": "", "published": ""}
+        )
+        raw["ipfs"] = await pin_to_ipfs(raw)
+        raw["content"] = text
+        doc_id = raw["ipfs"].split("/")[-1]
+        collection.add(documents=[json.dumps(raw)], ids=[doc_id])
+
+        # SSE broadcast
+        verdict_line = next((l for l in raw["published"].splitlines() if "VERDICT" in l.upper()), "")
+        # Verdict extraction order — check longer strings first to avoid substring matches
+        VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
+        verdict_key  = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+        _broadcast({"type": "new_verdict", "data": {
+            "claim": text, "verdict": verdict_key, "emoji": VERDICT_EMOJI[verdict_key],
+            "summary": raw["published"], "ipfs_hash": doc_id, "ipfs_url": raw["ipfs"],
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        }})
+
+        log(f"[DONE] IPFS: {doc_id}")
+        embed = build_verdict_embed(raw)
+        await status.delete()
+        verdict_msg = await ctx.send(embed=embed)
+        pending_votes[verdict_msg.id] = doc_id
+        await verdict_msg.add_reaction("👍")
+        await verdict_msg.add_reaction("👎")
+        
+        # Auto-post to #verified if this isn't already the verified channel
+        if ctx.channel.id != VERIFIED_CHANNEL_ID:
+            asyncio.create_task(post_to_verified_channel({
+                **raw,
+                "content": text,
+                "ipfs_hash": doc_id,
+            }))
     except Exception as e:
         log(f"[ERROR] {e}")
         await status.edit(content="⚠️ Something went wrong. Please try again.")

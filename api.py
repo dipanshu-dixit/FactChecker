@@ -1,11 +1,35 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timezone
+from collections import defaultdict, deque
 import chromadb
 import json
+import asyncio
+import httpx
+import time
+import re
+import os
 
+
+def normalize_claim(claim: str) -> str:
+    claim = claim.lower().strip()
+    claim = re.sub(r"[^\w\s]", "", claim)   # strip punctuation
+    claim = re.sub(r"\s+", " ", claim)       # collapse whitespace
+    return claim
+
+from sse_starlette.sse import EventSourceResponse
 from crawlconda_swarm import run_swarm, VERDICT_EMOJI
+
+DISCORD_VERIFIED_WEBHOOK = os.getenv("DISCORD_VERIFIED_WEBHOOK", "")
+
+# Verdict extraction order — check longer strings first to avoid substring matches
+VERDICT_ORDER = [
+    "PARTIALLY CONFIRMED",
+    "UNCONFIRMED",
+    "CONFIRMED",
+    "FALSE"
+]
 
 app = FastAPI(title="CrawlConda API")
 
@@ -20,24 +44,189 @@ chroma = chromadb.PersistentClient(path="./crawlconda_data")
 verdicts_col = chroma.get_or_create_collection("verified_crawlconda")
 votes_col = chroma.get_or_create_collection("human_votes")
 
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+_RATE_LIMIT   = 5       # max requests
+_RATE_WINDOW  = 3600    # seconds (1 hour)
+_rate_store: defaultdict[str, list[float]] = defaultdict(list)
 
+# ── Duplicate-claim cache window ───────────────────────────────────────────────
+_CACHE_WINDOW = 24 * 3600  # 24 hours in seconds
+
+# ── SSE broadcast registry ─────────────────────────────────────────────────────
+_sse_clients: list[asyncio.Queue] = []
+
+# ── Activity log ───────────────────────────────────────────────────────────────
+_activity_log: deque = deque(maxlen=20)
+
+
+async def broadcast(event: dict):
+    """Push an event to every connected SSE client."""
+    dead = []
+    for q in _sse_clients:
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        try:
+            _sse_clients.remove(q)
+        except ValueError:
+            pass
+
+
+async def post_to_discord_webhook(payload: dict):
+    """Send verdict to Discord #verified channel via webhook."""
+    print(f"[WEBHOOK] Called with verdict: {payload.get('verdict', 'UNKNOWN')}")
+    if not DISCORD_VERIFIED_WEBHOOK:
+        print("[WEBHOOK] No webhook URL configured")
+        return
+    print(f"[WEBHOOK] Webhook URL configured: {DISCORD_VERIFIED_WEBHOOK[:50]}...")
+    verdict = payload.get("verdict", "UNCONFIRMED")
+    colors = {
+        "CONFIRMED":           0x22c55e,
+        "PARTIALLY CONFIRMED": 0xeab308,
+        "UNCONFIRMED":         0xf97316,
+        "FALSE":               0xef4444,
+    }
+    color = colors.get(verdict, 0x555555)
+    emoji = {"CONFIRMED":"✅","PARTIALLY CONFIRMED":"🟡",
+             "UNCONFIRMED":"⚠️","FALSE":"❌"}.get(verdict,"🔍")
+    
+    sources = payload.get("sources", [])
+    source_lines = "\n".join(
+        f"{i+1}. [{s['title'][:80]}]({s['url']})"
+        for i, s in enumerate(sources[:3])
+    ) or "No sources matched."
+    
+    summary = payload.get("summary","").strip()
+    # strip VERDICT: header line if present
+    summary = "\n".join(
+        l for l in summary.splitlines() 
+        if "VERDICT:" not in l.upper()
+    ).strip()[:500]
+    
+    embed = {
+        "title": f"{emoji}  {verdict}",
+        "description": summary,
+        "color": color,
+        "fields": [
+            {"name": "Claim", 
+             "value": payload.get("claim","")[:300], 
+             "inline": False},
+            {"name": "Sources", 
+             "value": source_lines, 
+             "inline": False},
+            {"name": "Archived", 
+             "value": f"[View permanent record →]({payload.get('ipfs_url','')})", 
+             "inline": False},
+            {"name": "Signal this", 
+             "value": f"[Open on web]({payload.get('web_url','')})",
+             "inline": False},
+        ],
+        "footer": {"text": "CrawlConda · Ground Truth Engine"},
+        "timestamp": payload.get("timestamp",""),
+    }
+    try:
+        print(f"[WEBHOOK] Sending to Discord...")
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                DISCORD_VERIFIED_WEBHOOK,
+                json={"embeds": [embed]},
+                timeout=10
+            )
+            print(f"[WEBHOOK] Response status: {resp.status_code}")
+    except Exception as e:
+        print(f"[WEBHOOK] Failed: {e}")
+
+
+@app.get("/stream")
+async def stream(request: Request):
+    """Server-Sent Events endpoint — real-time verdict push to all web clients."""
+    q: asyncio.Queue = asyncio.Queue(maxsize=32)
+    _sse_clients.append(q)
+
+    async def generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=25)
+                    yield {"event": event["type"], "data": json.dumps(event["data"])}
+                except asyncio.TimeoutError:
+                    yield {"event": "ping", "data": ""}   # keep-alive heartbeat
+        finally:
+            try:
+                _sse_clients.remove(q)
+            except ValueError:
+                pass
+
+    return EventSourceResponse(generator())
+
+
+# ── Models ─────────────────────────────────────────────────────────────────────
 class VoteRequest(BaseModel):
-    vote: str          # "up" or "down"
+    vote: str       # "up" or "down"
     user_id: str
 
 
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 @app.get("/verify")
-async def verify(claim: str):
+async def verify(claim: str, request: Request):
+    # ── 1. Minimum length ──────────────────────────────────────────────────────
+    if len(claim.strip()) < 8:
+        raise HTTPException(status_code=400, detail="Claim too short. Please enter at least 8 characters.")
+
+    # ── 2. Rate limit ──────────────────────────────────────────────────────────
+    ip  = request.client.host
+    now = time.time()
+    _rate_store[ip] = [t for t in _rate_store[ip] if now - t < _RATE_WINDOW]
+    if len(_rate_store[ip]) >= _RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 5 verifications per hour per IP.")
+    _rate_store[ip].append(now)
+
+    # ── 3. Duplicate-claim cache (metadata index lookup — O(1)) ───────────────
+    claim_key = normalize_claim(claim)
+    try:
+        cached_results = verdicts_col.get(
+            where={"claim_key": {"$eq": claim_key}},
+            limit=1,
+        )
+        if cached_results["ids"]:
+            doc_id  = cached_results["ids"][0]
+            cached  = json.loads(cached_results["documents"][0])
+            meta    = cached_results["metadatas"][0] if cached_results["metadatas"] else {}
+            cached_ts = meta.get("timestamp") or cached.get("timestamp", "")
+            if cached_ts:
+                age = now - datetime.fromisoformat(
+                    cached_ts.replace("Z", "+00:00")
+                ).timestamp()
+                if age < _CACHE_WINDOW:
+                    votes = votes_col.get(where={"ipfs_hash": doc_id})
+                    up   = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
+                    down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
+                    return {**cached, "ipfs_hash": doc_id,
+                            "human_upvotes": up, "human_downvotes": down,
+                            "cached": True}
+    except Exception:
+        pass  # cache miss — fall through to full pipeline
+
+    # ── 4. Full pipeline ───────────────────────────────────────────────────────
     result = await run_swarm(claim)
     ipfs_hash = result["ipfs"].split("/")[-1]
-    verdict_line = next((l for l in result["published"].splitlines() if "VERDICT" in l.upper()), "")
-    verdict_key = next((k for k in VERDICT_EMOJI if k in verdict_line.upper()), "UNCONFIRMED")
+    verdict_line = next(
+        (l for l in result["published"].splitlines() if "VERDICT" in l.upper()), ""
+    )
+    verdict_key = next(
+        (k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED"
+    )
     sources = [
         {"title": p[0], "url": p[1], "source": p[2]}
         for entry in result["sources"].split("|||")[:8]
         if len(p := entry.split("||")) >= 3
     ]
-    return {
+    ts = datetime.now(tz=timezone.utc).isoformat()
+    payload = {
         "claim": claim,
         "verdict": verdict_key,
         "emoji": VERDICT_EMOJI[verdict_key],
@@ -45,21 +234,65 @@ async def verify(claim: str):
         "sources": sources,
         "ipfs_hash": ipfs_hash,
         "ipfs_url": result["ipfs"],
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": ts,
+        "claim_key": claim_key,
     }
+    # update ChromaDB metadata so future cache lookups hit the index
+    verdicts_col.update(
+        ids=[ipfs_hash],
+        metadatas=[{"claim_key": claim_key, "timestamp": ts}],
+    )
+    # log activity
+    _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
+    await broadcast({"type": "new_verdict", "data": payload})
+    # post to Discord #verified via webhook
+    web_url = os.getenv("WEB_URL", "https://crawl-conda.vercel.app")
+    payload["web_url"] = f"{web_url}/#/v/{ipfs_hash}"
+    print(f"[API] Calling webhook for claim: {claim[:50]}...")
+    await post_to_discord_webhook(payload)
+    print(f"[API] Webhook call completed")
+    return payload
 
 
 @app.post("/confirm/{ipfs_hash}")
-def confirm(ipfs_hash: str, body: VoteRequest):
+async def confirm(ipfs_hash: str, body: VoteRequest):
     if body.vote not in ("up", "down"):
         raise HTTPException(status_code=400, detail="vote must be 'up' or 'down'")
     vote_id = f"{ipfs_hash}:{body.user_id}"
     existing = votes_col.get(ids=[vote_id])
     if existing["ids"]:
-        votes_col.update(ids=[vote_id], documents=[body.vote], metadatas=[{"ipfs_hash": ipfs_hash, "user_id": body.user_id, "vote": body.vote}])
-        return {"status": "updated", "vote": body.vote}
-    votes_col.add(ids=[vote_id], documents=[body.vote], metadatas=[{"ipfs_hash": ipfs_hash, "user_id": body.user_id, "vote": body.vote}])
-    return {"status": "recorded", "vote": body.vote}
+        votes_col.update(
+            ids=[vote_id],
+            documents=[body.vote],
+            metadatas=[{"ipfs_hash": ipfs_hash, "user_id": body.user_id, "vote": body.vote}],
+        )
+        status = "updated"
+    else:
+        votes_col.add(
+            ids=[vote_id],
+            documents=[body.vote],
+            metadatas=[{"ipfs_hash": ipfs_hash, "user_id": body.user_id, "vote": body.vote}],
+        )
+        status = "recorded"
+    
+    # recalculate totals and broadcast
+    all_votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
+    up   = sum(1 for v in all_votes["metadatas"] if v["vote"] == "up")
+    down = sum(1 for v in all_votes["metadatas"] if v["vote"] == "down")
+    
+    # log activity
+    ts = datetime.now(tz=timezone.utc).isoformat()
+    _activity_log.append({"type": "vote", "ipfs_hash": ipfs_hash, "vote": body.vote, "ts": ts})
+    
+    await broadcast({
+        "type": "vote_update",
+        "data": {
+            "ipfs_hash": ipfs_hash,
+            "human_upvotes": up,
+            "human_downvotes": down
+        }
+    })
+    return {"status": status, "vote": body.vote}
 
 
 @app.get("/verdict/{ipfs_hash}")
@@ -69,9 +302,36 @@ def get_verdict(ipfs_hash: str):
         raise HTTPException(status_code=404, detail="Verdict not found")
     data = json.loads(results["documents"][0])
     votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
-    up = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
+    up   = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
     down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
-    return {**data, "ipfs_hash": ipfs_hash, "human_upvotes": up, "human_downvotes": down}
+    # parse raw pipe-delimited sources into [{title, url, source}] array
+    raw_sources = data.get("sources", "")
+    if isinstance(raw_sources, str) and "|||" in raw_sources:
+        sources = [
+            {"title": p[0], "url": p[1], "source": p[2]}
+            for entry in raw_sources.split("|||")[:8]
+            if len(p := entry.split("||")) >= 3
+        ]
+    elif isinstance(raw_sources, list):
+        sources = raw_sources
+    else:
+        sources = []
+    # extract verdict key and emoji from published text
+    published = data.get("published", "")
+    verdict_line = next((l for l in published.splitlines() if "VERDICT" in l.upper()), "")
+    verdict_key  = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+    return {
+        **data,
+        "claim":          data.get("content", ""),
+        "verdict":        verdict_key,
+        "emoji":          VERDICT_EMOJI[verdict_key],
+        "summary":        published,
+        "sources":        sources,
+        "ipfs_hash":      ipfs_hash,
+        "ipfs_url":       data.get("ipfs", ""),
+        "human_upvotes":  up,
+        "human_downvotes": down,
+    }
 
 
 @app.get("/verdicts")
@@ -81,23 +341,77 @@ def list_verdicts(limit: int = 20):
     for doc_id, doc in zip(results["ids"], results["documents"]):
         try:
             data = json.loads(doc)
-            ipfs_hash = data.get("ipfs", "").split("/")[-1]
+            ipfs_hash = data.get("ipfs", "").split("/")[-1] or doc_id
             votes = votes_col.get(where={"ipfs_hash": ipfs_hash}) if ipfs_hash else {"metadatas": []}
             up = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
             down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
-            out.append({"id": doc_id, "ipfs_hash": ipfs_hash, "human_upvotes": up, "human_downvotes": down, **data})
+            out.append({
+                "id": doc_id,
+                "ipfs_hash": ipfs_hash,
+                "human_upvotes": up,
+                "human_downvotes": down,
+                "claim": data.get("claim") or data.get("content", ""),
+                **data,
+            })
         except Exception:
             continue
     return {"verdicts": out, "count": len(out)}
 
 
+@app.get("/trending")
+def trending():
+    """Top 5 verdicts by combined votes in the last 24 hours."""
+    cutoff = datetime.now(tz=timezone.utc).timestamp() - 86400
+    results = verdicts_col.get()
+    scored = []
+    for doc_id, doc, meta in zip(
+        results["ids"],
+        results["documents"],
+        results["metadatas"] or [{}] * len(results["ids"])
+    ):
+        try:
+            data = json.loads(doc)
+            ts   = data.get("timestamp") or meta.get("timestamp", "")
+            if ts:
+                age = datetime.fromisoformat(
+                    ts.replace("Z", "+00:00")).timestamp()
+                if age < cutoff:
+                    continue
+            ipfs_hash = data.get("ipfs","").split("/")[-1] or doc_id
+            votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
+            score = len(votes["metadatas"])
+            if score > 0:
+                up   = sum(1 for v in votes["metadatas"] if v["vote"]=="up")
+                down = sum(1 for v in votes["metadatas"] if v["vote"]=="down")
+                scored.append({
+                    "claim":    data.get("claim") or data.get("content", ""),
+                    "verdict":  data.get("verdict",""),
+                    "ipfs_hash": ipfs_hash,
+                    "human_upvotes":   up,
+                    "human_downvotes": down,
+                    "total_votes": score
+                })
+        except Exception:
+            continue
+    scored.sort(key=lambda x: x["total_votes"], reverse=True)
+    return {"trending": scored[:5]}
+
+
+@app.get("/activity")
+def get_activity():
+    return {"events": list(reversed(_activity_log))}
+
+
 @app.post("/recover")
 async def recover_from_pinata():
-    """Rebuild local ChromaDB index from all pins on Pinata. Run this if crawlconda_data/ is lost."""
-    import httpx, os
+    """Rebuild local ChromaDB index from all pins on Pinata."""
+    import httpx
+    import os
+
     pinata_jwt = os.getenv("PINATA_JWT")
     if not pinata_jwt:
         raise HTTPException(status_code=500, detail="PINATA_JWT not set")
+
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             "https://api.pinata.cloud/data/pinList?status=pinned&pageLimit=1000&metadata[name]=crawlconda",
@@ -106,6 +420,7 @@ async def recover_from_pinata():
         )
         resp.raise_for_status()
         pins = resp.json().get("rows", [])
+
     recovered, skipped = 0, 0
     for pin in pins:
         ipfs_hash = pin["ipfs_pin_hash"]
@@ -115,10 +430,13 @@ async def recover_from_pinata():
             continue
         async with httpx.AsyncClient() as client:
             try:
-                r = await client.get(f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}", timeout=15)
+                r = await client.get(
+                    f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}", timeout=15
+                )
                 data = r.json()
                 verdicts_col.add(ids=[ipfs_hash], documents=[json.dumps(data)])
                 recovered += 1
             except Exception:
                 skipped += 1
+
     return {"recovered": recovered, "skipped": skipped, "total_pins": len(pins)}

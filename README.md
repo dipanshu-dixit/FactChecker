@@ -1,6 +1,6 @@
-# CrawlConda
+# CrawlConda — Ground Truth Engine
 
-A multi-agent fact-checking system. Give it a claim — it searches 24 live RSS feeds, runs a 4-node AI pipeline, and returns a source-grounded verdict pinned permanently to IPFS. Humans can confirm or challenge every verdict via Discord reactions or REST API.
+A multi-agent fact-checking system. Submit any claim — it searches 24 live RSS feeds, runs a 4-node AI pipeline, and returns a source-grounded verdict pinned permanently to IPFS. Humans can confirm or challenge every claim via Discord reactions, the web UI, or the REST API. All verdicts sync in real time across every open browser tab and Discord simultaneously via SSE.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ cd crawlconda
 pip install -r requirements.txt
 ```
 
-Fill in `.env`:
+Create `.env` in the project root:
 ```
 XAI_API_KEY=
 DISCORD_TOKEN=
@@ -18,17 +18,40 @@ DISCORD_CHANNEL_ID=
 PINATA_JWT=
 ```
 
-Run the Discord bot:
+**Terminal 1 — API:**
 ```bash
-python crawlconda_swarm.py
+python3 -m uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Run the REST API:
+**Terminal 2 — Discord bot:**
 ```bash
-uvicorn api:app --reload --port 8000
+python3 crawlconda_swarm.py
 ```
 
-## Usage
+**Terminal 3 — Web frontend:**
+```bash
+cd frontend
+python3 -m http.server 3000
+```
+
+Open `http://localhost:3000` in your browser.
+
+> In GitHub Codespaces: use the forwarded URLs from the **Ports** tab instead of localhost. Set both ports to **Public** visibility.
+
+---
+
+## Verdicts
+
+| Claims | Meaning |
+|---|---|
+| ✅ CONFIRMED | Sources explicitly report the event |
+| 🟡 PARTIALLY CONFIRMED | Sources support part of the claim but not all details |
+| ⚠️ UNCONFIRMED | Sources found but none mention the claim |
+| ❌ FALSE | Sources explicitly contradict the claim |
+
+---
+
+## Discord
 
 ```
 !verify [claim]
@@ -40,30 +63,37 @@ uvicorn api:app --reload --port 8000
 !verify Apple released a new chip today
 ```
 
-## Verdicts
+The bot posts a rich embed with verdict, reasoning, numbered sources, and an IPFS archive link. React 👍/👎 to cast a human vote.
 
-| Verdict | Meaning |
-|---|---|
-| ✅ CONFIRMED | Sources explicitly report the event |
-| 🟡 PARTIALLY CONFIRMED | Sources support part of the claim but not all details |
-| ⚠️ UNCONFIRMED | Sources found but none mention the claim |
-| ❌ FALSE | Sources explicitly contradict the claim |
+---
 
 ## API
 
 ```
-GET  /verify?claim=...        # run a verification
-POST /confirm/:ipfs_hash      # cast a human vote {"vote": "up"/"down", "user_id": "..."}
-GET  /verdict/:ipfs_hash      # fetch verdict + vote counts
-GET  /verdicts                # list all past verdicts
+GET  /verify?claim=...           # run a verification (cached within 24h)
+POST /confirm/:ipfs_hash         # cast a human vote {"vote": "up"/"down", "user_id": "..."}
+GET  /verdict/:ipfs_hash         # fetch verdict + vote counts
+GET  /verdicts?limit=50          # list all past verdicts
+GET  /stream                     # SSE stream for real-time verdict push
+POST /recover                    # rebuild ChromaDB from Pinata if DB is lost
 ```
 
 Interactive docs: `http://localhost:8000/docs`
 
+---
+
+## Spam Protection
+
+- **Rate limit:** 5 verifications per IP per hour. Returns `429` if exceeded.
+- **Claim cache:** Identical or punctuation-variant claims within 24 hours return instantly from cache (`"cached": true`) — no LLM cost.
+- **Minimum length:** Claims under 8 characters return `400`.
+
+---
+
 ## Live Demo
 
-Join the Discord server to see CrawlConda in action: [discord.gg/4hX4f7cu](https://discord.gg/4hX4f7cu)
+Join the Discord server: [discord.gg/4hX4f7cu](https://discord.gg/4hX4f7cu)
 
 ## Full Documentation
 
-See [DOCS.md](DOCS.md) for complete setup guide, architecture, all 24 sources, API reference, and troubleshooting.
+See [DOCS.md](DOCS.md) for complete architecture, pipeline details, all 24 sources, API reference, known limitations, test guide, and deployment instructions.
