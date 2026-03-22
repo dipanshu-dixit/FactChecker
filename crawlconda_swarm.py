@@ -136,6 +136,9 @@ def log(msg: str):
 
 def search_news(query: str) -> str:
     keywords = [w.lower() for w in query.split() if len(w) > 3]
+    # BUG 2 FIX: fallback for short queries
+    if not keywords:
+        keywords = [w.lower() for w in query.split() if w]
     # CLEANED: quote_plus now imported at top
     google_rss = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
     feeds = [google_rss] + RSS_FEEDS
@@ -162,7 +165,12 @@ def search_news(query: str) -> str:
                         entry.get("summary", "") or
                         entry.get("description", "")
                     )[:800]
-                    hits.append((match_count, entry.title, entry.link, name, desc))
+                    # BUG 1 FIX: safe access to title and link
+                    title = entry.get("title", "").strip()
+                    link  = entry.get("link",  "").strip()
+                    if not title or not link:
+                        continue
+                    hits.append((match_count, title, link, name, desc))
                     matched += 1
             log(f"  [{name}] {len(feed.entries)} entries → {matched} matched")
         except Exception as e:
@@ -500,23 +508,16 @@ def record_vote(ipfs_hash: str, user_id: str, vote: str):
     all_votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
     up   = sum(1 for v in all_votes["metadatas"] if v["vote"] == "up")
     down = sum(1 for v in all_votes["metadatas"] if v["vote"] == "down")
+    # BUG 3 FIX: single vote_update broadcast with all data
     _broadcast({
         "type": "vote_update",
         "data": {
-            "ipfs_hash": ipfs_hash,
-            "human_upvotes":   up,
-            "human_downvotes": down,
-            "source": "discord"
-        }
-    })
-    _broadcast({
-        "type": "activity_update", 
-        "data": {
-            "type": "vote",
-            "ipfs_hash": ipfs_hash,
-            "vote": vote,
-            "source": "discord",
-            "ts": datetime.now(tz=timezone.utc).isoformat()
+            "ipfs_hash":        ipfs_hash,
+            "human_upvotes":    up,
+            "human_downvotes":  down,
+            "vote":             vote,
+            "source":           "discord",
+            "ts":               datetime.now(tz=timezone.utc).isoformat()
         }
     })
 
@@ -606,6 +607,19 @@ async def verify(ctx, *, text: str):
         raw = await patched_swarm.ainvoke(
             {"content": text, "sources": "", "scanned": "", "verdict": "", "published": ""}
         )
+        # BUG 5 FIX: timeout wrapper to prevent Discord WebSocket drops
+        try:
+            raw = await asyncio.wait_for(
+                patched_swarm.ainvoke(
+                    {"content": text, "sources": "", "scanned": "", "verdict": "", "published": ""}
+                ),
+                timeout=120.0
+            )
+        except asyncio.TimeoutError:
+            await status.edit(
+                content="⚠️ Verification timed out after 2 minutes. Try a more specific claim."
+            )
+            return
         raw["ipfs"] = await pin_to_ipfs(raw)
         raw["content"] = text
         doc_id = raw["ipfs"].split("/")[-1]
