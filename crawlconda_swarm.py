@@ -359,12 +359,6 @@ async def run_swarm(content: str) -> dict:
         "ipfs_url": result["ipfs"],
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
     }})
-    # Auto-post to #verified channel
-    asyncio.create_task(post_to_verified_channel({
-        **result,
-        "ipfs_hash": doc_id,
-        "ipfs":      result["ipfs"],
-    }))
     return result
 
 VERDICT_EMOJI = {"CONFIRMED": "✅", "PARTIALLY CONFIRMED": "🟡", "UNCONFIRMED": "⚠️", "FALSE": "❌"}
