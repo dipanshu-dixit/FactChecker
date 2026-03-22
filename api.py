@@ -132,8 +132,14 @@ async def post_to_discord_webhook(payload: dict):
              "inline": False},
         ],
         "footer": {"text": "CrawlConda · Ground Truth Engine"},
-        "timestamp": payload.get("timestamp",""),
     }
+    # BUG 2 FIX: Format timestamp for Discord, omit if empty
+    ts = (
+        payload.get("timestamp", "")
+        or datetime.now(tz=timezone.utc).isoformat()
+    ).replace("+00:00", "Z")
+    if ts and ts != "Z":
+        embed["timestamp"] = ts
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(

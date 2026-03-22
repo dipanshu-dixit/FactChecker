@@ -349,12 +349,14 @@ def publisher_node(state: State):
     log("[PUBLISHER] Formatting final signal")
     prompt = (
         f"{state['verdict'][:600]}\n\n"
-        f"Rewrite the REASONING section above into 2 clean sentences "
-        f"that explain what the sources DO and DO NOT say about the claim. "
-        f"Be specific — name what evidence exists and what is missing.\n"
-        f"Start directly with the explanation, no preamble.\n"
-        f"Do not include the VERDICT line or KEY SOURCE line.\n"
-        f"Nothing else."
+        f"Rewrite into this exact format, two lines only:\n"
+        f"Line 1: VERDICT: [copy the exact verdict type from above — "
+        f"CONFIRMED or PARTIALLY CONFIRMED or UNCONFIRMED or FALSE]\n"
+        f"Line 2: empty\n"
+        f"Line 3: One sentence explaining what the sources "
+        f"specifically say or do not say about the claim. "
+        f"Name the evidence. Be direct.\n"
+        f"Nothing else. No preamble. No KEY SOURCE line."
     )
     published = get_llm().invoke(prompt).content[:600]
     log(f"[PUBLISHER] → {published[:80]}")
