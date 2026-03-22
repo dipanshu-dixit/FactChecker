@@ -14,25 +14,17 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-API_INTERNAL_URL = os.getenv("API_INTERNAL_URL", "http://localhost:8000")
-
 def _broadcast(data: dict):
-    """Push event to API via HTTP so SSE clients get it."""
+    """Push event directly to API broadcast (same process)."""
     try:
-        import threading
-        def _post():
-            try:
-                import requests
-                requests.post(
-                    f"{API_INTERNAL_URL}/internal/broadcast",
-                    json=data,
-                    timeout=3
-                )
-            except Exception as e:
-                log(f"[BROADCAST] Failed: {e}")
-        threading.Thread(target=_post, daemon=True).start()
-    except Exception:
-        pass
+        from api import broadcast as _api_broadcast
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_api_broadcast(data))
+        else:
+            loop.run_until_complete(_api_broadcast(data))
+    except Exception as e:
+        print(f"[BROADCAST] Failed: {e}")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
@@ -354,20 +346,6 @@ async def run_swarm(content: str) -> dict:
     result["ipfs"] = await pin_to_ipfs(result)
     doc_id = result["ipfs"].split("/")[-1]
     collection.add(documents=[json.dumps(result)], ids=[doc_id])
-    # Push to SSE clients so web frontend updates in real time
-    verdict_line = next((l for l in result["published"].splitlines() if "VERDICT" in l.upper()), "")
-    # Verdict extraction order — check longer strings first to avoid substring matches
-    VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
-    verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
-    _broadcast({"type": "new_verdict", "data": {
-        "claim": content,
-        "verdict": verdict_key,
-        "emoji": VERDICT_EMOJI[verdict_key],
-        "summary": result["published"],
-        "ipfs_hash": doc_id,
-        "ipfs_url": result["ipfs"],
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-    }})
     return result
 
 VERDICT_EMOJI = {"CONFIRMED": "✅", "PARTIALLY CONFIRMED": "🟡", "UNCONFIRMED": "⚠️", "FALSE": "❌"}

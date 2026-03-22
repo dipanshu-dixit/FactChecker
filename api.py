@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timezone
@@ -22,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 from crawlconda_swarm import run_swarm, VERDICT_EMOJI
 
 DISCORD_VERIFIED_WEBHOOK = os.getenv("DISCORD_VERIFIED_WEBHOOK", "")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
 
 # Verdict extraction order — check longer strings first to avoid substring matches
 VERDICT_ORDER = [
@@ -165,8 +166,13 @@ async def stream(request: Request):
 
 
 @app.post("/internal/broadcast")
-async def internal_broadcast(event: dict):
+async def internal_broadcast(
+    event: dict,
+    x_internal_secret: str = Header(default="")
+):
     """Internal endpoint for bot process to push SSE events."""
+    if INTERNAL_SECRET and x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
     await broadcast(event)
     return {"ok": True}
 
@@ -245,19 +251,31 @@ async def verify(claim: str, request: Request):
         "claim_key": claim_key,
     }
     # update ChromaDB metadata so future cache lookups hit the index
-    verdicts_col.update(
-        ids=[ipfs_hash],
-        metadatas=[{"claim_key": claim_key, "timestamp": ts}],
-    )
+    try:
+        verdicts_col.update(
+            ids=[ipfs_hash],
+            metadatas=[{"claim_key": claim_key, "timestamp": ts}],
+        )
+    except Exception:
+        try:
+            verdicts_col.upsert(
+                ids=[ipfs_hash],
+                documents=[json.dumps({**result,
+                    "claim": claim,
+                    "timestamp": ts,
+                    "claim_key": claim_key
+                })],
+                metadatas=[{"claim_key": claim_key, "timestamp": ts}],
+            )
+        except Exception as e:
+            print(f"[CACHE] Failed to write claim_key: {e}")
     # log activity
     _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
     await broadcast({"type": "new_verdict", "data": payload})
     # post to Discord #verified via webhook
     web_url = os.getenv("WEB_URL", "https://crawl-conda.vercel.app").strip()
     payload["web_url"] = f"{web_url}/#/v/{ipfs_hash}"
-    print(f"[API] Calling webhook for claim: {claim[:50]}...")
-    await post_to_discord_webhook(payload)
-    print(f"[API] Webhook call completed")
+    asyncio.create_task(post_to_discord_webhook(payload))
     return payload
 
 

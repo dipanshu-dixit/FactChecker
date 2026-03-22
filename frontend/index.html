@@ -983,8 +983,15 @@
   document.addEventListener("DOMContentLoaded", router);
 
   // ── SSE — real-time sync (Discord → web, web → web) ─────────────────────────
+  let _activeSSE = null;
+
   function connectSSE() {
+    if (_activeSSE) {
+      _activeSSE.close();
+      _activeSSE = null;
+    }
     const es = new EventSource(`${API}/stream`);
+    _activeSSE = es;
 
     es.addEventListener("open", () => {
       document.getElementById("live-dot").style.display = "inline-block";
