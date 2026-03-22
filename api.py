@@ -56,7 +56,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-chroma = chromadb.PersistentClient(path=CHROMA_PATH)  # CLEANED: use constant
+# Cache ONNX models on the persistent volume so they survive restarts without re-downloading
+onnx_cache = os.getenv(
+    "CHROMA_ONNX_PATH", 
+    os.path.join(CHROMA_PATH, "onnx_models")
+)
+os.makedirs(onnx_cache, exist_ok=True)
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = onnx_cache
+
+chroma = chromadb.PersistentClient(
+    path=CHROMA_PATH,
+    settings=chromadb.Settings(
+        anonymized_telemetry=False,
+        allow_reset=False,
+    )
+)  # CLEANED: use constant
 verdicts_col = chroma.get_or_create_collection(COL_VERDICTS)  # CLEANED: use constant
 votes_col = chroma.get_or_create_collection(COL_VOTES)  # CLEANED: use constant
 

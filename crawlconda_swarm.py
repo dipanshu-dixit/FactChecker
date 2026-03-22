@@ -307,8 +307,13 @@ def scanner_node(state: State):
         f"Claim: {state['content'][:300]}\n\n"
         f"News sources retrieved:\n{plain[:2500]}\n\n"
         f"Extract ONLY facts that are explicitly stated in the sources above. "
-        f"Do NOT add any outside knowledge. If a source headline or description mentions an attack, damage, strike, or event — state it as a fact. "
-        f"Max 4 bullet points."
+        f"Do NOT add any outside knowledge. "
+        f"CRITICAL: Read EVERY headline literally as a fact. "
+        f"If a headline says 'X cuts output by 17%' — that means "
+        f"X happened and is a confirmed fact from that source. "
+        f"If a headline says 'Attack on Y' — Y was attacked, state it. "
+        f"Headlines are facts, not opinions. Extract them all. "
+        f"Max 4 bullet points, prioritize the most specific facts.\n"
     )
     scanned = get_llm().invoke(prompt).content[:600]
     log(f"[SCANNER] → {scanned[:120]}")
@@ -403,7 +408,21 @@ graph.add_edge("Verdict", "Publisher")
 graph.add_edge("Publisher", END)
 swarm = graph.compile()
 
-chroma = chromadb.PersistentClient(path=CHROMA_PATH)  # CLEANED: use constant
+# Cache ONNX models on the persistent volume so they survive restarts without re-downloading
+onnx_cache = os.getenv(
+    "CHROMA_ONNX_PATH", 
+    os.path.join(CHROMA_PATH, "onnx_models")
+)
+os.makedirs(onnx_cache, exist_ok=True)
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = onnx_cache
+
+chroma = chromadb.PersistentClient(
+    path=CHROMA_PATH,
+    settings=chromadb.Settings(
+        anonymized_telemetry=False,
+        allow_reset=False,
+    )
+)  # CLEANED: use constant
 collection = chroma.get_or_create_collection(COL_VERDICTS)  # CLEANED: use constant
 
 async def pin_to_ipfs(data: dict) -> str:
