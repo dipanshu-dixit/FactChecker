@@ -182,6 +182,29 @@ async def internal_broadcast(
     elif x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
     await broadcast(event)
+    
+    # Log Discord activity so /activity endpoint reflects Discord actions in the live banner
+    ts = datetime.now(tz=timezone.utc).isoformat()
+    data = event.get("data", {})
+    event_type = event.get("type", "")
+    
+    if event_type == "new_verdict":
+        _activity_log.append({
+            "type":    "verify",
+            "claim":   data.get("claim", ""),
+            "verdict": data.get("verdict", ""),
+            "source":  "discord",
+            "ts":      data.get("timestamp", ts)
+        })
+    elif event_type == "vote_update":
+        _activity_log.append({
+            "type":      "vote",
+            "ipfs_hash": data.get("ipfs_hash", ""),
+            "vote":      data.get("vote", ""),
+            "source":    "discord",
+            "ts":        ts
+        })
+    
     return {"ok": True}
 
 
