@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timezone
@@ -171,7 +171,9 @@ async def internal_broadcast(
     x_internal_secret: str = Header(default="")
 ):
     """Internal endpoint for bot process to push SSE events."""
-    if INTERNAL_SECRET and x_internal_secret != INTERNAL_SECRET:
+    if not INTERNAL_SECRET:
+        pass  # no secret configured — allow (dev mode)
+    elif x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
     await broadcast(event)
     return {"ok": True}
@@ -191,9 +193,16 @@ async def verify(claim: str, request: Request):
         raise HTTPException(status_code=400, detail="Claim too short. Please enter at least 8 characters.")
 
     # ── 2. Rate limit ──────────────────────────────────────────────────────────
-    ip  = request.client.host
+    ip = request.headers.get(
+        "x-forwarded-for", request.client.host
+    ).split(",")[0].strip()
     now = time.time()
     _rate_store[ip] = [t for t in _rate_store[ip] if now - t < _RATE_WINDOW]
+    # Periodically purge IPs with no recent requests
+    if len(_rate_store) > 1000:
+        stale = [k for k, v in _rate_store.items() if not v]
+        for k in stale:
+            del _rate_store[k]
     if len(_rate_store[ip]) >= _RATE_LIMIT:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 5 verifications per hour per IP.")
     _rate_store[ip].append(now)
@@ -271,10 +280,10 @@ async def verify(claim: str, request: Request):
             print(f"[CACHE] Failed to write claim_key: {e}")
     # log activity
     _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
-    await broadcast({"type": "new_verdict", "data": payload})
-    # post to Discord #verified via webhook
+    # set web_url BEFORE broadcast so SSE clients receive it
     web_url = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
     payload["web_url"] = f"{web_url}/#/v/{ipfs_hash}"
+    await broadcast({"type": "new_verdict", "data": payload})
     asyncio.create_task(post_to_discord_webhook(payload))
     return payload
 
@@ -283,6 +292,10 @@ async def verify(claim: str, request: Request):
 async def confirm(ipfs_hash: str, body: VoteRequest):
     if body.vote not in ("up", "down"):
         raise HTTPException(status_code=400, detail="vote must be 'up' or 'down'")
+    if not body.user_id or len(body.user_id) > 128:
+        raise HTTPException(status_code=400, detail="user_id must be 1-128 characters.")
+    if ":" in body.user_id:
+        raise HTTPException(status_code=400, detail="user_id cannot contain ':'")
     vote_id = f"{ipfs_hash}:{body.user_id}"
     existing = votes_col.get(ids=[vote_id])
     if existing["ids"]:
@@ -347,7 +360,7 @@ def get_verdict(ipfs_hash: str):
     verdict_key  = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
     return {
         **data,
-        "claim":          data.get("content", ""),
+        "claim":          data.get("claim") or data.get("content", ""),
         "verdict":        verdict_key,
         "emoji":          VERDICT_EMOJI[verdict_key],
         "summary":        published,
@@ -360,7 +373,7 @@ def get_verdict(ipfs_hash: str):
 
 
 @app.get("/verdicts")
-def list_verdicts(limit: int = 20):
+def list_verdicts(limit: int = Query(default=20, le=200)):
     results = verdicts_col.get(limit=limit)
     out = []
     for doc_id, doc in zip(results["ids"], results["documents"]):
@@ -387,7 +400,7 @@ def list_verdicts(limit: int = 20):
 def trending():
     """Top 5 verdicts by combined votes in the last 24 hours."""
     cutoff = datetime.now(tz=timezone.utc).timestamp() - 86400
-    results = verdicts_col.get()
+    results = verdicts_col.get(limit=500)
     scored = []
     for doc_id, doc, meta in zip(
         results["ids"],
@@ -447,19 +460,23 @@ async def recover_from_pinata():
         pins = resp.json().get("rows", [])
 
     recovered, skipped = 0, 0
-    for pin in pins:
-        ipfs_hash = pin["ipfs_pin_hash"]
-        existing = verdicts_col.get(ids=[ipfs_hash])
-        if existing["ids"]:
-            skipped += 1
-            continue
-        async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
+        for pin in pins:
+            ipfs_hash = pin["ipfs_pin_hash"]
+            existing = verdicts_col.get(ids=[ipfs_hash])
+            if existing["ids"]:
+                skipped += 1
+                continue
             try:
                 r = await client.get(
-                    f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}", timeout=15
+                    f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}",
+                    timeout=15
                 )
                 data = r.json()
-                verdicts_col.add(ids=[ipfs_hash], documents=[json.dumps(data)])
+                verdicts_col.add(
+                    ids=[ipfs_hash],
+                    documents=[json.dumps(data)]
+                )
                 recovered += 1
             except Exception:
                 skipped += 1

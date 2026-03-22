@@ -29,8 +29,14 @@ def _broadcast(data: dict):
         print(f"[BROADCAST] Failed: {e}")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-VERIFIED_CHANNEL_ID = int(os.getenv("VERIFIED_CHANNEL_ID", "0"))
+def _safe_int(val, default=0):
+    try:
+        return int(val or default)
+    except (ValueError, TypeError):
+        return default
+
+DISCORD_CHANNEL_ID  = _safe_int(os.getenv("DISCORD_CHANNEL_ID"), 0)
+VERIFIED_CHANNEL_ID = _safe_int(os.getenv("VERIFIED_CHANNEL_ID"), 0)
 PINATA_JWT = os.getenv("PINATA_JWT")
 
 _llm = None
@@ -111,7 +117,8 @@ def log(msg: str):
 
 def search_news(query: str) -> str:
     keywords = [w.lower() for w in query.split() if len(w) > 3]
-    google_rss = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
+    from urllib.parse import quote_plus
+    google_rss = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
     feeds = [google_rss] + RSS_FEEDS
     hits = []
     for url in feeds:
@@ -121,8 +128,13 @@ def search_news(query: str) -> str:
             feed = feedparser.parse(url)
             matched = 0
             for entry in feed.entries[:15]:
-                if "published_parsed" in entry and time.time() - time.mktime(entry.published_parsed) > 86400 * 30:
-                    continue
+                try:
+                    if (entry.get("published_parsed") and
+                            time.time() - time.mktime(
+                                entry.published_parsed) > 86400 * 30):
+                        continue
+                except (TypeError, ValueError, OverflowError):
+                    pass  # malformed date — include the entry
                 text = (entry.get("title", "") + " " + entry.get("summary", "") + " " + entry.get("description", "")).lower()
                 match_count = sum(1 for k in keywords if k in text)
                 if match_count >= max(1, len(keywords) // 2):
@@ -178,7 +190,8 @@ def expand_query(text: str) -> str:
     return get_llm().invoke(prompt).content.strip()[:200]
 
 _search_cache: dict = {}
-_SEARCH_TTL = 300  # 5 minutes
+_SEARCH_TTL   = 300  # 5 minutes
+_SEARCH_MAX   = 100
 
 def cached_search(query: str) -> str:
     now = time.time()
@@ -188,6 +201,9 @@ def cached_search(query: str) -> str:
             log(f"[SEARCH_CACHE] Hit for: {query[:50]}")
             return result
     result = search_news(query)
+    if len(_search_cache) >= _SEARCH_MAX:
+        oldest = min(_search_cache, key=lambda k: _search_cache[k][1])
+        del _search_cache[oldest]
     _search_cache[query] = (result, now)
     return result
 
@@ -339,21 +355,36 @@ chroma = chromadb.PersistentClient(path="./crawlconda_data")
 collection = chroma.get_or_create_collection("verified_crawlconda")
 
 async def pin_to_ipfs(data: dict) -> str:
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.pinata.cloud/pinning/pinJSONToIPFS",
-            headers={"Authorization": f"Bearer {PINATA_JWT}"},
-            json={"pinataContent": data, "pinataMetadata": {"name": f"crawlconda-{datetime.now(tz=timezone.utc).isoformat()}"}},  
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return f"https://gateway.pinata.cloud/ipfs/{resp.json()['IpfsHash']}"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+                headers={"Authorization": f"Bearer {PINATA_JWT}"},
+                json={"pinataContent": data, "pinataMetadata": {"name": f"crawlconda-{datetime.now(tz=timezone.utc).isoformat()}"}},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return f"https://gateway.pinata.cloud/ipfs/{resp.json()['IpfsHash']}"
+    except Exception as e:
+        log(f"[IPFS] Pin failed: {e} — verdict stored locally only")
+        import hashlib
+        fallback_id = "local_" + hashlib.sha256(
+            json.dumps(data, sort_keys=True).encode()
+        ).hexdigest()[:40]
+        return f"https://gateway.pinata.cloud/ipfs/{fallback_id}"
 
 async def run_swarm(content: str) -> dict:
     result = await swarm.ainvoke({"content": content, "sources": "", "scanned": "", "verdict": "", "published": ""})
     result["ipfs"] = await pin_to_ipfs(result)
     doc_id = result["ipfs"].split("/")[-1]
-    collection.add(documents=[json.dumps(result)], ids=[doc_id])
+    collection.upsert(
+        ids=[doc_id],
+        documents=[json.dumps(result)],
+        metadatas=[{
+            "claim_key": "",
+            "timestamp": datetime.now(tz=timezone.utc).isoformat()
+        }]
+    )
     return result
 
 VERDICT_EMOJI = {"CONFIRMED": "✅", "PARTIALLY CONFIRMED": "🟡", "UNCONFIRMED": "⚠️", "FALSE": "❌"}
@@ -499,6 +530,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         record_vote(ipfs_hash, str(payload.user_id), "up")
     elif emoji == "👎":
         record_vote(ipfs_hash, str(payload.user_id), "down")
+    # Evict oldest entries if dict exceeds 500 entries
+    if len(pending_votes) > 500:
+        oldest_keys = list(pending_votes.keys())[:100]
+        for k in oldest_keys:
+            del pending_votes[k]
 
 @bot.command()
 async def verify(ctx, *, text: str):
@@ -544,7 +580,16 @@ async def verify(ctx, *, text: str):
         raw["ipfs"] = await pin_to_ipfs(raw)
         raw["content"] = text
         doc_id = raw["ipfs"].split("/")[-1]
-        collection.add(documents=[json.dumps(raw)], ids=[doc_id])
+        from api import normalize_claim
+        _ck = normalize_claim(text)
+        collection.upsert(
+            ids=[doc_id],
+            documents=[json.dumps({**raw, "claim": text})],
+            metadatas=[{
+                "claim_key": _ck,
+                "timestamp": datetime.now(tz=timezone.utc).isoformat()
+            }]
+        )
 
         # SSE broadcast
         verdict_line = next((l for l in raw["published"].splitlines() if "VERDICT" in l.upper()), "")
@@ -559,7 +604,10 @@ async def verify(ctx, *, text: str):
 
         log(f"[DONE] IPFS: {doc_id}")
         embed = build_verdict_embed(raw)
-        await status.delete()
+        try:
+            await status.delete()
+        except Exception:
+            await status.edit(content="✓")
         verdict_msg = await ctx.send(embed=embed)
         pending_votes[verdict_msg.id] = doc_id
         await verdict_msg.add_reaction("👍")

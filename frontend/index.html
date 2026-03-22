@@ -567,7 +567,7 @@
   <div class="about-section">
     <h2>Open Source & Self-Hostable</h2>
     <p>The full pipeline is open source. Add your own API keys and run a private instance — air-gapped if needed.</p>
-    <p><a href="https://github.com/yourname/crawlconda" style="color:#7c6af7">github.com/yourname/crawlconda</a></p>
+    <p><a href="https://github.com/dipanshu-dixit/FactChecker" style="color:#7c6af7">github.com/dipanshu-dixit/FactChecker</a></p>
   </div>
 
   <div class="discord-banner">
@@ -582,8 +582,9 @@
 
 <script>
   // Auto-detect API URL based on environment
-  const API = window.location.hostname === 'localhost' || window.location.hostname.includes('github.dev')
-    ? 'https://organic-space-potato-vwj45pw6xxq3pvq9-8000.app.github.dev'
+  const API = window.location.hostname === 'localhost' ||
+              window.location.hostname.includes('127.0.0.1')
+    ? 'http://localhost:8000'
     : (window.API_URL || 'https://factchecker-production-3945.up.railway.app');
 
   const EMOJI = {
@@ -653,7 +654,7 @@
     }
 
     btn.disabled    = false;
-    btn.textContent = "Verify";
+    btn.textContent = "Investigate";
   }
 
   // ── Trending ─────────────────────────────────────────────────────────────────
@@ -896,7 +897,19 @@
     try {
       const res   = await fetch(`${API}/verdicts?limit=50`);
       const data  = await res.json();
-      window._allVerdicts = (data.verdicts || []).slice().reverse();
+      const incoming = (data.verdicts || []).slice().reverse();
+      // Merge: keep SSE items not yet in API response
+      const existingHashes = new Set(
+        incoming.map(v => v.ipfs_hash || v.id)
+      );
+      const sseOnly = window._allVerdicts.filter(
+        v => !existingHashes.has(v.ipfs_hash || v.id)
+      );
+      window._allVerdicts = [...sseOnly, ...incoming];
+      // Cap at 200 to prevent unbounded growth
+      if (window._allVerdicts.length > 200) {
+        window._allVerdicts = window._allVerdicts.slice(0, 200);
+      }
       if (!window._allVerdicts.length) {
         list.innerHTML = `<div class="empty">No verdicts yet. Be the first to verify a claim.</div>`;
         return;
@@ -962,13 +975,28 @@
   // ── Share ────────────────────────────────────────────────────────────────────
   function copyShare(hash) {
     const url = `${window.location.origin}${window.location.pathname}#/v/${hash}`;
-    navigator.clipboard.writeText(url).then(() => {
-      const el = document.getElementById(`share-confirm-${hash}`);
+    const el = document.getElementById(`share-confirm-${hash}`);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(() => {
+        if (el) {
+          el.style.display = "inline";
+          setTimeout(() => el.style.display = "none", 2000);
+        }
+      });
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
       if (el) {
         el.style.display = "inline";
         setTimeout(() => el.style.display = "none", 2000);
       }
-    });
+    }
   }
 
   // ── Router ───────────────────────────────────────────────────────────────────
@@ -995,6 +1023,7 @@
 
     es.addEventListener("open", () => {
       document.getElementById("live-dot").style.display = "inline-block";
+      connectSSE._retry = 1;  // reset backoff only on confirmed success
     });
 
     es.addEventListener("new_verdict", e => {
@@ -1046,7 +1075,6 @@
       const delay = Math.min((connectSSE._retry || 1) * 2000, 15000);
       connectSSE._retry = (connectSSE._retry || 1) + 1;
       setTimeout(() => {
-        connectSSE._retry = 1;
         connectSSE();
       }, delay);
     };
@@ -1067,8 +1095,12 @@
           return `${e.vote === "up" ? "↑" : "↓"} vote on record`;
         return "";
       }).filter(Boolean).join("   ·   ");
-      document.getElementById("activity-inner").textContent = 
-        text || "No activity yet";
+      const el = document.getElementById("activity-inner");
+      el.textContent = text || "No activity yet";
+      // Force CSS animation restart so new text always scrolls from the right
+      el.style.animation = "none";
+      el.offsetHeight; // trigger reflow
+      el.style.animation = "";
     } catch(_) {}
   }
 

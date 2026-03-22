@@ -5,17 +5,22 @@ A multi-agent fact-checking system. Submit any claim — it searches 24 live RSS
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourname/crawlconda
+git clone https://github.com/dipanshu-dixit/FactChecker
 cd crawlconda
 pip install -r requirements.txt
 ```
 
 Create `.env` in the project root:
 ```
-XAI_API_KEY=
-DISCORD_TOKEN=
-DISCORD_CHANNEL_ID=
-PINATA_JWT=
+XAI_API_KEY=your_xai_key
+DISCORD_TOKEN=your_discord_bot_token
+DISCORD_CHANNEL_ID=your_verify_channel_id
+VERIFIED_CHANNEL_ID=your_verified_channel_id
+PINATA_JWT=your_pinata_jwt
+DISCORD_VERIFIED_WEBHOOK=https://discord.com/api/webhooks/...
+INTERNAL_SECRET=any_random_string_here
+WEB_URL=https://your-app.vercel.app
+API_INTERNAL_URL=https://your-railway-service.up.railway.app
 ```
 
 **Terminal 1 — API:**

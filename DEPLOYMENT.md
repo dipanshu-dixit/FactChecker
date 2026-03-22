@@ -331,9 +331,9 @@ ChromaDB volume on Railway:
 After deployment, update these in your documentation:
 
 - **Web UI**: `https://crawlconda.vercel.app`
-- **API**: `https://crawlconda-api.up.railway.app`
-- **API Docs**: `https://crawlconda-api.up.railway.app/docs`
-- **Discord**: Your Discord server invite link
+- **API**: `factchecker-production-3945.up.railway.app`
+- **API Docs**: `https://factchecker-production-3945.up.railway.app/docs`
+- **Discord**: `https://discord.gg/4hX4f7cu`
 
 ---
 

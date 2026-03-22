@@ -27,7 +27,7 @@ All three share the same ChromaDB database. A vote from Discord shows up on the 
 ## Installation
 
 ```bash
-git clone https://github.com/yourname/crawlconda
+git clone https://github.com/dipanshu-dixit/FactChecker
 cd crawlconda
 pip install -r requirements.txt
 ```
@@ -37,8 +37,12 @@ Create a `.env` file in the project root:
 ```
 XAI_API_KEY=your_xai_key
 DISCORD_TOKEN=your_discord_bot_token
-DISCORD_CHANNEL_ID=your_channel_id
+DISCORD_CHANNEL_ID=your_verify_channel_id
+VERIFIED_CHANNEL_ID=your_verified_channel_id
 PINATA_JWT=your_pinata_jwt
+DISCORD_VERIFIED_WEBHOOK=https://discord.com/api/webhooks/...
+INTERNAL_SECRET=any_random_string
+WEB_URL=https://your-app.vercel.app
 ```
 
 ### Getting each key
@@ -289,6 +293,32 @@ es.addEventListener('new_verdict', e => {
 
 Emits `new_verdict` events whenever a verdict is created from Discord or web. The frontend uses this to update "The Record" page in real time across all open tabs.
 
+#### `GET /activity`
+Returns the last 20 events (verifications and votes) as a scrolling activity log. Used by the live ticker at the bottom of the web UI.
+
+```bash
+curl "http://localhost:8000/activity"
+```
+
+Response:
+```json
+{"events": [{"type": "verify", "claim": "...", "verdict": "CONFIRMED", "ts": "..."},
+             {"type": "vote",   "ipfs_hash": "Qm...", "vote": "up", "ts": "..."}]}
+```
+
+#### `GET /trending`
+Returns the top 5 most-voted verdicts from the last 24 hours.
+
+```bash
+curl "http://localhost:8000/trending"
+```
+
+Response:
+```json
+{"trending": [{"claim": "...", "verdict": "CONFIRMED", "ipfs_hash": "Qm...",
+               "human_upvotes": 12, "human_downvotes": 1, "total_votes": 13}]}
+```
+
 #### `POST /recover`
 Rebuild local ChromaDB index from all pins on Pinata.
 
@@ -514,85 +544,75 @@ pip install -r requirements.txt
 
 ## Deploying to Railway
 
-Railway runs both the API and Discord bot as two separate services from the same GitHub repo. The ChromaDB data folder is mounted as a persistent volume so it survives deploys.
+CrawlConda runs as a **single Railway service** using `start.sh` to manage both the API and Discord bot in one container. This is critical — both processes must share one filesystem so they read and write the same ChromaDB database.
 
-### Step 1 — Push to GitHub
+> **DO NOT create two separate Railway services.** That causes a split-brain where Discord and web write to different databases and verdicts never sync.
 
+### Steps
+
+**1. Push to GitHub**
 ```bash
 git add .
 git commit -m "ready for deploy"
 git push origin main
 ```
+Make sure `.env` is in `.gitignore`. Never push your keys.
 
-Make sure `.env` is in `.gitignore` — it is by default. Never push your keys.
-
-### Step 2 — Create Railway project
-
+**2. Create Railway project**
 1. Go to https://railway.app and sign in with GitHub
 2. Click **New Project** → **Deploy from GitHub repo** → select your repo
-3. Railway will detect the `Procfile` and start building
+3. Railway will detect `Procfile` and `railway.toml` automatically
 
-### Step 3 — Add environment variables
+**3. Set the start command**
 
-In Railway dashboard → your service → **Variables** tab, add all four:
-
+In Railway service settings → **Deploy** tab → **Start Command**:
 ```
-XAI_API_KEY=
-DISCORD_TOKEN=
-DISCORD_CHANNEL_ID=
-PINATA_JWT=
+bash start.sh
 ```
+This starts uvicorn (API) and the Discord bot in the same container.
 
-### Step 4 — Add the second service (Discord bot)
-
-Railway runs one service by default (the API). To also run the bot:
-
-1. In your Railway project → **New Service** → **GitHub repo** (same repo)
-2. In that service's settings → **Start Command**: `python crawlconda_swarm.py`
-3. Add the same 4 environment variables to this service too
-
-### Step 5 — Add persistent volume for the API service
-
-1. In the API service → **Volumes** tab → **Add Volume**
+**4. Add a persistent volume**
+1. Railway dashboard → your service → **Volumes** tab → **Add Volume**
 2. Mount path: `/app/crawlconda_data`
 
-This keeps your ChromaDB data alive across deploys and restarts.
+This preserves all verdicts and votes across deploys and restarts.
 
-### Step 6 — Deploy frontend to Vercel
+**5. Set all environment variables**
 
+In Railway dashboard → your service → **Variables** tab:
+```
+XAI_API_KEY=your_xai_key
+DISCORD_TOKEN=your_bot_token
+DISCORD_CHANNEL_ID=your_verify_channel_id
+VERIFIED_CHANNEL_ID=your_verified_channel_id
+PINATA_JWT=your_pinata_jwt
+DISCORD_VERIFIED_WEBHOOK=https://discord.com/api/webhooks/...
+INTERNAL_SECRET=any_random_string
+WEB_URL=https://your-app.vercel.app
+```
+
+**6. Deploy and verify**
+
+Watch the Railway logs for both of these lines:
+```
+✅ CrawlConda bot live as CrawlConda#xxxx
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+If only one appears, check that `start.sh` is the active start command.
+
+**7. Deploy frontend to Vercel**
 1. Go to https://vercel.com and sign in with GitHub
 2. **New Project** → select your repo
 3. Root directory: `frontend`
-4. Deploy
+4. Deploy — no build step needed, it's a single HTML file
 
-Vercel will auto-detect `vercel.json` and serve `index.html` as an SPA.
+The `index.html` auto-detects the environment. On Vercel it uses the production Railway URL already set in the `API` constant. No manual URL change needed unless you want to override it via `window.API_URL`.
 
-### Step 7 — Update frontend API URL
-
-In `frontend/index.html`, change:
-```javascript
-const API = "http://localhost:8000";
-```
-to:
-```javascript
-const API = "https://your-railway-api-url.up.railway.app";
-```
-
-Commit and push — Vercel will auto-redeploy.
-
-### Step 8 — Test production
-
-Railway gives the API service a public URL like:
-```
-https://crawlconda-api-production.up.railway.app
-```
-
-Test it:
+**8. Test production**
 ```bash
-curl "https://your-url.up.railway.app/verdicts"
+curl "https://your-railway-url.up.railway.app/verdicts"
 ```
-
-Open your Vercel URL in browser and test the full flow.
+Open your Vercel URL and test the full flow.
 
 ---
 
@@ -603,47 +623,47 @@ Open your Vercel URL in browser and test the full flow.
 │                    Frontend (Vercel)                        │
 │                   frontend/index.html                       │
 │                                                             │
-│  • Ground Truth Engine UI                                  │
-│  • Verify page + The Record page + About                   │
-│  • Filter bar (All/Confirmed/Partial/Unconfirmed/False)    │
+│  • Verify page + The Record + Trending + About              │
+│  • Filter bar (All/Confirmed/Partial/Unconfirmed/False)     │
 │  • Real-time SSE connection to API                          │
 │  • Optimistic vote updates                                  │
+│  • Live activity ticker (GET /activity)                     │
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP + SSE
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    API (Railway)                            │
-│                      api.py                                 │
+│             Railway (single service — start.sh)             │
 │                                                             │
-│  GET  /verify       → run pipeline or return cache          │
-│  POST /confirm      → record human vote                     │
-│  GET  /verdict      → fetch single verdict + votes          │
-│  GET  /verdicts     → list all verdicts                     │
-│  GET  /stream       → SSE broadcast (real-time push)        │
-│  POST /recover      → rebuild DB from Pinata                │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  uvicorn api:app  (port 8000)                        │  │
+│  │                                                      │  │
+│  │  GET  /verify       → pipeline or cache              │  │
+│  │  POST /confirm      → record human vote              │  │
+│  │  GET  /verdict      → single verdict + votes         │  │
+│  │  GET  /verdicts     → list all verdicts              │  │
+│  │  GET  /trending     → top 5 by votes (24h)           │  │
+│  │  GET  /activity     → last 20 events (ticker)        │  │
+│  │  GET  /stream       → SSE broadcast                  │  │
+│  │  POST /recover      → rebuild DB from Pinata         │  │
+│  │                                                      │  │
+│  │  Rate limit: 5 req/IP/hour                           │  │
+│  │  Cache: 24h fuzzy match via claim_key metadata       │  │
+│  └──────────────────────────────────────────────────────┘  │
 │                                                             │
-│  • Rate limit: 5 req/IP/hour                                │
-│  • Cache: 24h fuzzy match via claim_key metadata            │
-│  • SSE broadcast to all connected clients                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  python crawlconda_swarm.py  (Discord bot)           │  │
+│  │                                                      │  │
+│  │  !verify [claim]                                     │  │
+│  │  → LangGraph pipeline (same as web)                  │  │
+│  │  → pin to IPFS → write ChromaDB                      │  │
+│  │  → post rich embed to Discord                        │  │
+│  │  → 👍/👎 reactions → record_vote()                   │  │
+│  │  → _broadcast() → SSE → all browser tabs             │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Both processes share: ./crawlconda_data/ (ChromaDB)        │
+│  Mounted as Railway Volume at /app/crawlconda_data          │
 └─────────────────────┬───────────────────────────────────────┘
-                      │
-                      ├─────────────────────────────────────┐
-                      │                                     │
-                      ▼                                     ▼
-┌─────────────────────────────────┐   ┌─────────────────────────────────┐
-│   Discord Bot (Railway)         │   │   LangGraph Pipeline            │
-│   crawlconda_swarm.py           │   │                                 │
-│                                 │   │  [1] Expander (LLM)             │
-│  !verify [claim]                │   │  [2] Searcher (24 RSS feeds)    │
-│  → run_swarm()                  │   │  [3] Scanner (LLM)              │
-│  → post rich embed              │   │  [4] Verdict (LLM)              │
-│  → add 👍/👎 reactions          │   │  [5] Publisher (LLM)            │
-│  → record votes on reaction     │   │                                 │
-│                                 │   │  Cost: ~$0.0004/request         │
-│  • 5-stage status updates       │   │  Time: 15-25s                   │
-│  • Colored embed with sources   │   └─────────────────────────────────┘
-│  • IPFS link in footer          │
-└─────────────────────┬───────────┘
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
