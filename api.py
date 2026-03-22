@@ -164,6 +164,13 @@ async def stream(request: Request):
     return EventSourceResponse(generator())
 
 
+@app.post("/internal/broadcast")
+async def internal_broadcast(event: dict):
+    """Internal endpoint for bot process to push SSE events."""
+    await broadcast(event)
+    return {"ok": True}
+
+
 # ── Models ─────────────────────────────────────────────────────────────────────
 class VoteRequest(BaseModel):
     vote: str       # "up" or "down"

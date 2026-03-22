@@ -14,14 +14,23 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-# Lazy import — only resolves when both processes share the same runtime (Railway)
+API_INTERNAL_URL = os.getenv("API_INTERNAL_URL", "http://localhost:8000")
+
 def _broadcast(data: dict):
+    """Push event to API via HTTP so SSE clients get it."""
     try:
-        from api import broadcast as _b
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_b(data))
+        import threading
+        def _post():
+            try:
+                import requests
+                requests.post(
+                    f"{API_INTERNAL_URL}/internal/broadcast",
+                    json=data,
+                    timeout=3
+                )
+            except Exception as e:
+                log(f"[BROADCAST] Failed: {e}")
+        threading.Thread(target=_post, daemon=True).start()
     except Exception:
         pass
 
@@ -553,13 +562,13 @@ async def verify(ctx, *, text: str):
 
         # SSE broadcast
         verdict_line = next((l for l in raw["published"].splitlines() if "VERDICT" in l.upper()), "")
-        # Verdict extraction order — check longer strings first to avoid substring matches
         VERDICT_ORDER = ["PARTIALLY CONFIRMED", "UNCONFIRMED", "CONFIRMED", "FALSE"]
         verdict_key  = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
         _broadcast({"type": "new_verdict", "data": {
             "claim": text, "verdict": verdict_key, "emoji": VERDICT_EMOJI[verdict_key],
             "summary": raw["published"], "ipfs_hash": doc_id, "ipfs_url": raw["ipfs"],
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "source": "discord",
         }})
 
         log(f"[DONE] IPFS: {doc_id}")
