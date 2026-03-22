@@ -18,11 +18,13 @@ def _broadcast(data: dict):
     """Push event directly to API broadcast (same process)."""
     try:
         from api import broadcast as _api_broadcast
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_api_broadcast(data))
-        else:
-            loop.run_until_complete(_api_broadcast(data))
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(_api_broadcast(data))
+            )
+        except RuntimeError:
+            asyncio.run(_api_broadcast(data))
     except Exception as e:
         print(f"[BROADCAST] Failed: {e}")
 
@@ -31,14 +33,20 @@ DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 VERIFIED_CHANNEL_ID = int(os.getenv("VERIFIED_CHANNEL_ID", "0"))
 PINATA_JWT = os.getenv("PINATA_JWT")
 
-llm = ChatOpenAI(
-    model="grok-4-1-fast-reasoning",
-    temperature=0,
-    api_key=os.getenv("XAI_API_KEY"),
-    base_url="https://api.x.ai/v1",
-    max_tokens=600,
-    max_retries=1,
-)
+_llm = None
+
+def get_llm():
+    global _llm
+    if _llm is None:
+        _llm = ChatOpenAI(
+            model="grok-4-1-fast-reasoning",
+            temperature=0,
+            api_key=os.getenv("XAI_API_KEY"),
+            base_url="https://api.x.ai/v1",
+            max_tokens=600,
+            max_retries=1,
+        )
+    return _llm
 
 RSS_FEEDS = [
     # World / Breaking News
@@ -167,7 +175,7 @@ def expand_query(text: str) -> str:
         f"Return ONLY the keywords as a single line, space-separated, no explanation.\n"
         f"Claim: {text}"
     )
-    return llm.invoke(prompt).content.strip()[:200]
+    return get_llm().invoke(prompt).content.strip()[:200]
 
 _search_cache: dict = {}
 _SEARCH_TTL = 300  # 5 minutes
@@ -208,7 +216,7 @@ def searcher_node(state: State):
             f"from this query as a search string. Return ONLY the "
             f"words, nothing else.\nQuery: {expanded}"
         )
-        simple_query = llm.invoke(simple_prompt).content.strip()[:100]
+        simple_query = get_llm().invoke(simple_prompt).content.strip()[:100]
         log(f"[SEARCHER] Simplified query: {simple_query}")
         retry_sources = search_news(simple_query)
         retry_real = [s for s in retry_sources.split("|||")
@@ -241,7 +249,7 @@ def scanner_node(state: State):
         f"Do NOT add any outside knowledge. If a source headline or description mentions an attack, damage, strike, or event — state it as a fact. "
         f"Max 4 bullet points."
     )
-    scanned = llm.invoke(prompt).content[:600]
+    scanned = get_llm().invoke(prompt).content[:600]
     log(f"[SCANNER] → {scanned[:120]}")
     return {"scanned": scanned}
 
@@ -296,7 +304,7 @@ def verdict_node(state: State):
         f"specifically says or does NOT say about the claim.]\n"
         f"KEY SOURCE: [exact headline, or 'None' if no direct source]"
     )
-    verdict = llm.invoke(prompt).content[:600]
+    verdict = get_llm().invoke(prompt).content[:600]
     log(f"[VERDICT] → {verdict[:120]}")
     return {"verdict": verdict}
 
@@ -311,7 +319,7 @@ def publisher_node(state: State):
         f"Do not include the VERDICT line or KEY SOURCE line.\n"
         f"Nothing else."
     )
-    published = llm.invoke(prompt).content[:600]
+    published = get_llm().invoke(prompt).content[:600]
     log(f"[PUBLISHER] → {published[:80]}")
     return {"published": published}
 
@@ -373,7 +381,7 @@ def build_verdict_embed(result: dict) -> discord.Embed:
         title=f"{emoji}  {verdict_key}",
         description=summary,
         color=color,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
     embed.add_field(name="Claim", value=result.get("content", "")[:300], inline=False)
 
