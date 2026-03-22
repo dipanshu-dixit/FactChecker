@@ -181,33 +181,36 @@ async def internal_broadcast(
     x_internal_secret: str = Header(default="")
 ):
     """Internal endpoint for bot process to push SSE events."""
-    if not INTERNAL_SECRET:
-        pass  # no secret configured — allow (dev mode)
-    elif x_internal_secret != INTERNAL_SECRET:
+    if INTERNAL_SECRET and x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
+    
     await broadcast(event)
     
-    # Log Discord activity so /activity endpoint reflects Discord actions in the live banner
-    ts = datetime.now(tz=timezone.utc).isoformat()
-    data = event.get("data", {})
-    event_type = event.get("type", "")
+    ts    = datetime.now(tz=timezone.utc).isoformat()
+    data  = event.get("data", {})
+    etype = event.get("type", "")
     
-    if event_type == "new_verdict":
-        _activity_log.append({
-            "type":    "verify",
-            "claim":   data.get("claim", ""),
-            "verdict": data.get("verdict", ""),
-            "source":  "discord",
-            "ts":      data.get("timestamp", ts)
-        })
-    elif event_type == "vote_update":
-        _activity_log.append({
-            "type":      "vote",
-            "ipfs_hash": data.get("ipfs_hash", ""),
-            "vote":      data.get("vote", ""),
-            "source":    "discord",
-            "ts":        ts
-        })
+    try:
+        if etype == "new_verdict":
+            _activity_log.append({
+                "type":    "verify",
+                "claim":   data.get("claim", ""),
+                "verdict": data.get("verdict", "UNCONFIRMED"),
+                "source":  "discord",
+                "ts":      data.get("timestamp", ts)
+            })
+            print(f"[ACTIVITY] Discord verdict logged: {data.get('claim','')[:50]}")
+        elif etype == "vote_update":
+            _activity_log.append({
+                "type":      "vote",
+                "ipfs_hash": data.get("ipfs_hash", ""),
+                "vote":      data.get("vote", "signal"),
+                "source":    "discord",
+                "ts":        ts
+            })
+            print(f"[ACTIVITY] Discord vote logged: {data.get('vote','')} on {data.get('ipfs_hash','')[:16]}")
+    except Exception as e:
+        print(f"[ACTIVITY] Failed to log: {e}")
     
     return {"ok": True}
 

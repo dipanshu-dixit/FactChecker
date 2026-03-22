@@ -33,19 +33,37 @@ COL_VERDICTS       = "verified_crawlconda"
 COL_VOTES          = "human_votes"
 WEB_URL            = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
 
+# CLEANED: API_INTERNAL_URL for cross-process HTTP broadcast
+API_INTERNAL_URL = (
+    os.getenv("API_INTERNAL_URL", "")
+    or f"http://localhost:{os.getenv('PORT', '8080')}"
+)
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
+
 def _broadcast(data: dict):
-    """Push event directly to API broadcast (same process)."""
-    try:
-        from api import broadcast as _api_broadcast
+    """POST to API process via HTTP — the only way to 
+    reach SSE clients in a separate OS process."""
+    def _post():
         try:
-            loop = asyncio.get_running_loop()
-            loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(_api_broadcast(data))
+            import urllib.request as _req
+            import json as _json
+            body = _json.dumps(data).encode()
+            req  = _req.Request(
+                f"{API_INTERNAL_URL}/internal/broadcast",
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Secret": INTERNAL_SECRET,
+                },
+                method="POST"
             )
-        except RuntimeError:
-            asyncio.run(_api_broadcast(data))
-    except Exception as e:
-        print(f"[BROADCAST] Failed: {e}")
+            with _req.urlopen(req, timeout=3) as resp:
+                pass
+        except Exception as e:
+            print(f"[BROADCAST] Failed: {e}")
+    
+    import threading
+    threading.Thread(target=_post, daemon=True).start()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 def _safe_int(val, default=0):
@@ -213,7 +231,10 @@ def expand_query(text: str) -> str:
         f"Return ONLY the keywords as a single line, space-separated, no explanation.\n"
         f"Claim: {text}"
     )
-    return get_llm().invoke(prompt).content.strip()[:200]
+    raw = get_llm().invoke(prompt).content.strip()[:200]
+    # BUG 1 FIX: Remove quotes that break keyword splitting
+    clean = raw.replace('"', '').replace("'", '').strip()
+    return clean
 
 _search_cache: dict = {}  # CLEANED: TTL and MAX now module-level constants
 
@@ -604,9 +625,6 @@ async def verify(ctx, *, text: str):
         g.add_edge("Publisher", _END)
         patched_swarm = g.compile()
 
-        raw = await patched_swarm.ainvoke(
-            {"content": text, "sources": "", "scanned": "", "verdict": "", "published": ""}
-        )
         # BUG 5 FIX: timeout wrapper to prevent Discord WebSocket drops
         try:
             raw = await asyncio.wait_for(
