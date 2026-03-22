@@ -273,7 +273,7 @@ async def verify(claim: str, request: Request):
     _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
     await broadcast({"type": "new_verdict", "data": payload})
     # post to Discord #verified via webhook
-    web_url = os.getenv("WEB_URL", "https://crawl-conda.vercel.app").strip()
+    web_url = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
     payload["web_url"] = f"{web_url}/#/v/{ipfs_hash}"
     asyncio.create_task(post_to_discord_webhook(payload))
     return payload
