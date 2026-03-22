@@ -396,23 +396,29 @@ def build_verdict_embed(result: dict) -> discord.Embed:
     )
     embed.add_field(name="Claim", value=result.get("content", "")[:300], inline=False)
 
-    # Top 3 sources as a numbered list
+    # Top 3 sources as a numbered list - TRUNCATE to fit 1024 char limit
     source_lines = []
     if "|||" in result["sources"]:
         for entry in result["sources"].split("|||")[:3]:
             parts = entry.split("||")
             if len(parts) >= 3:
-                title, link = parts[0].strip()[:80], parts[1].strip()
+                title, link = parts[0].strip()[:60], parts[1].strip()
                 if title and link:
                     source_lines.append(f"{len(source_lines)+1}. [{title}]({link})")
+    sources_text = "\n".join(source_lines) if source_lines else "No sources matched."
     embed.add_field(
         name="Sources",
-        value="\n".join(source_lines) if source_lines else "No sources matched.",
+        value=sources_text[:1020],  # Discord limit is 1024 chars per field
         inline=False,
     )
+    
+    # Get web URL from environment, strip any whitespace/newlines
+    web_url = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
+    ipfs_hash = result.get("ipfs_hash", result.get("ipfs", "").split("/")[-1])
+    
     embed.add_field(
         name="Archived",
-        value=f"[View permanent record →]({result['ipfs']})",
+        value=f"[IPFS Record]({result['ipfs']}) · [Web View]({web_url}/#/v/{ipfs_hash})",
         inline=False,
     )
     embed.set_footer(text="CrawlConda · Ground Truth Engine")

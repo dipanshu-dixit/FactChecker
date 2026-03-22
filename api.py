@@ -246,7 +246,7 @@ async def verify(claim: str, request: Request):
     _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
     await broadcast({"type": "new_verdict", "data": payload})
     # post to Discord #verified via webhook
-    web_url = os.getenv("WEB_URL", "https://crawl-conda.vercel.app")
+    web_url = os.getenv("WEB_URL", "https://crawl-conda.vercel.app").strip()
     payload["web_url"] = f"{web_url}/#/v/{ipfs_hash}"
     print(f"[API] Calling webhook for claim: {claim[:50]}...")
     await post_to_discord_webhook(payload)
