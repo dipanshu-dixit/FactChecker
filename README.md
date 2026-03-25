@@ -2,9 +2,8 @@
 
 A multi-agent fact-checking system. Submit any claim — it searches 24 live RSS feeds, runs a 4-node AI pipeline, and returns a source-grounded verdict pinned permanently to IPFS. Humans can confirm or challenge every claim via Discord reactions, the web UI, or the REST API. All verdicts sync in real time across every open browser tab and Discord simultaneously via SSE.
 
-<img width="1819" height="796" alt="Image" src="https://github.com/user-attachments/assets/f50cb0f0-47c2-4056-b39c-3ad7bbd8e427" />
-<img width="1919" height="840" alt="Image" src="https://github.com/user-attachments/assets/3d5b6170-6d2b-4570-a2c0-1b0a73c1d3a0" />
 <img width="1915" height="840" alt="Image" src="https://github.com/user-attachments/assets/c0096d7b-bc9a-45f0-853f-12558d982aae" />
+<img width="1919" height="840" alt="Image" src="https://github.com/user-attachments/assets/3d5b6170-6d2b-4570-a2c0-1b0a73c1d3a0" />
 
 ## Quick Start
 
