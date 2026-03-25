@@ -5,3 +5,6 @@ builder = "nixpacks"
 startCommand = "bash start.sh"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+[[build.env]]
+NO_CACHE = "1"
