@@ -586,48 +586,39 @@
 <script>
   // Auto-detect API URL based on environment with DNS bypass
   const API_URLS = [
-    'https://factchecker-production-3945.up.railway.app',
-    'https://api-production-241e.up.railway.app',
-    'https://api.allorigins.win/raw?url=https://factchecker-production-3945.up.railway.app',
-    window.location.hostname === 'localhost' ? 'http://localhost:8000' : null
+    window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')
+      ? 'http://localhost:8000'
+      : '/api/proxy?path='
   ].filter(Boolean);
   
   let API = window.location.hostname === 'localhost' ||
             window.location.hostname.includes('127.0.0.1')
     ? 'http://localhost:8000'
-    : API_URLS[0];
+    : '/api/proxy?path=';
   
   let currentAPIIndex = 0;
   
   // Enhanced fetch with automatic fallback and timeout
   async function apiFetch(endpoint, options = {}) {
     const timeout = 8000;
+    const url = `${API}${endpoint}`;
     
-    for (let i = 0; i < API_URLS.length; i++) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-        
-        const url = `${API_URLS[currentAPIIndex]}${endpoint}`;
-        console.log(`[API] Trying: ${API_URLS[currentAPIIndex]}`);
-        const res = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (res.ok || (res.status >= 400 && res.status < 500)) {
-          API = API_URLS[currentAPIIndex];
-          console.log(`[API] ✓ Connected: ${API}`);
-          return res;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      } catch (e) {
-        console.error(`[API] ✗ Failed: ${API_URLS[currentAPIIndex]} - ${e.message}`);
-        if (i < API_URLS.length - 1) {
-          currentAPIIndex = (currentAPIIndex + 1) % API_URLS.length;
-          continue;
-        }
-        console.error('[API] All endpoints failed. Your network may be blocking Railway domains.');
-        throw e;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
+      console.log(`[API] Trying: ${url}`);
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (res.ok || (res.status >= 400 && res.status < 500)) {
+        console.log(`[API] ✓ Connected`);
+        return res;
       }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error(`[API] ✗ Failed: ${e.message}`);
+      throw e;
     }
   }
 
