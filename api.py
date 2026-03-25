@@ -10,6 +10,15 @@ import httpx
 import time
 import re
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 def normalize_claim(claim: str) -> str:
@@ -487,6 +496,25 @@ def trending():
 @app.get("/activity")
 def get_activity():
     return {"events": list(reversed(_activity_log))}
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring."""
+    try:
+        # Test ChromaDB
+        verdicts_col.get(limit=1)
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "components": {
+                "api": "ok",
+                "database": "ok",
+                "sse_clients": len(_sse_clients)
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Unhealthy: {str(e)}")
 
 
 @app.post("/recover")

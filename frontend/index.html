@@ -689,10 +689,20 @@
 
     try {
       const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`);
-      if (!res.ok) throw new Error("API error " + res.status);
+      if (!res.ok) {
+        if (res.status === 429) {
+          result.innerHTML = `<div class="error-msg">⚠️ Rate limit exceeded. Please wait a few minutes before trying again.</div>`;
+        } else if (res.status === 503) {
+          result.innerHTML = `<div class="error-msg">⚠️ Service temporarily unavailable. Please try again in a moment.</div>`;
+        } else {
+          throw new Error("API error " + res.status);
+        }
+        return;
+      }
       const data = await res.json();
       result.innerHTML = renderVerdictCard(data, true);
     } catch (e) {
+      console.error('Verification error:', e);
       result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
     }
 
