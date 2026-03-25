@@ -581,11 +581,61 @@
 </div>
 
 <script>
-  // Auto-detect API URL based on environment
-  const API = window.location.hostname === 'localhost' ||
-              window.location.hostname.includes('127.0.0.1')
+  // Auto-detect API URL based on environment with fallback
+  const API_URLS = [
+    'https://factchecker-production-3945.up.railway.app',
+    'https://api-production-241e.up.railway.app'
+  ];
+  
+  let API = window.location.hostname === 'localhost' ||
+            window.location.hostname.includes('127.0.0.1')
     ? 'http://localhost:8000'
-    : (window.API_URL || 'https://factchecker-production-3945.up.railway.app');
+    : (window.API_URL || API_URLS[0]);
+  
+  let currentAPIIndex = 0;
+  
+  // Test API connectivity and switch to fallback if needed
+  async function getWorkingAPI() {
+    for (let i = 0; i < API_URLS.length; i++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`${API_URLS[i]}/verdicts?limit=1`, {
+          signal: controller.signal,
+          method: 'HEAD'
+        });
+        clearTimeout(timeoutId);
+        if (res.ok || res.status === 404) {
+          currentAPIIndex = i;
+          return API_URLS[i];
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    return API_URLS[0];
+  }
+  
+  // Enhanced fetch with automatic fallback
+  async function apiFetch(endpoint, options = {}) {
+    let lastError;
+    for (let attempt = 0; attempt < API_URLS.length; attempt++) {
+      try {
+        const url = `${API}${endpoint}`;
+        const res = await fetch(url, options);
+        if (res.ok) return res;
+        if (res.status >= 400 && res.status < 500) return res;
+        throw new Error(`HTTP ${res.status}`);
+      } catch (e) {
+        lastError = e;
+        if (attempt < API_URLS.length - 1) {
+          currentAPIIndex = (currentAPIIndex + 1) % API_URLS.length;
+          API = API_URLS[currentAPIIndex];
+        }
+      }
+    }
+    throw lastError;
+  }
 
   // CLEANED: VERDICT_ORDER defined once as constant
   const VERDICT_ORDER = [
@@ -653,7 +703,7 @@
     result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 24 sources and analysing…</div>`;
 
     try {
-      const res = await fetch(`${API}/verify?claim=${encodeURIComponent(claim)}`);
+      const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`);
       if (!res.ok) throw new Error("API error " + res.status);
       const data = await res.json();
       result.innerHTML = renderVerdictCard(data, true);
@@ -668,7 +718,7 @@
   // ── Trending ─────────────────────────────────────────────────────────────────
   async function loadTrending() {
     try {
-      const res  = await fetch(`${API}/trending`);
+      const res  = await apiFetch(`/trending`);
       const data = await res.json();
       const list = document.getElementById("trending-list");
       if (!data.trending?.length) {
@@ -833,12 +883,12 @@
 
     // Background POST + reconcile true server counts
     try {
-      await fetch(`${API}/confirm/${hash}`, {
+      await apiFetch(`/confirm/${hash}`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ vote, user_id: userId })
       });
-      const r    = await fetch(`${API}/verdict/${hash}`);
+      const r    = await apiFetch(`/verdict/${hash}`);
       const data = await r.json();
       if (upEl)   upEl.textContent   = data.human_upvotes   || 0;
       if (downEl) downEl.textContent = data.human_downvotes || 0;
@@ -898,7 +948,7 @@
     const list = document.getElementById("verdicts-list");
     list.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdicts…</div>`;
     try {
-      const res   = await fetch(`${API}/verdicts?limit=50`);
+      const res   = await apiFetch(`/verdicts?limit=50`);
       const data  = await res.json();
       const incoming = (data.verdicts || []).slice().reverse();
       // Merge: keep SSE items not yet in API response
@@ -964,7 +1014,7 @@
     const result = document.getElementById("verify-result");
     result.innerHTML = `<div class="status"><div class="spinner"></div>Loading verdict…</div>`;
     try {
-      const res  = await fetch(`${API}/verdict/${encodeURIComponent(hash)}`);
+      const res  = await apiFetch(`/verdict/${encodeURIComponent(hash)}`);
       if (!res.ok) throw new Error(res.status);
       const data = await res.json();
       result.innerHTML = renderVerdictCard(data, true);
@@ -1088,7 +1138,7 @@
   // ── Activity bar ──────────────────────────────────────────────────────────────────
   async function updateActivityBar() {
     try {
-      const res = await fetch(`${API}/activity`);
+      const res = await apiFetch(`/activity`);
       const data = await res.json();
       const events = data.events || [];
       const text = events.map(e => {
