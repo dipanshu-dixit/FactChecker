@@ -481,7 +481,7 @@
 <div class="page active" id="page-verify">
   <div class="hero">
     <h1>Ground Truth <span>Engine</span></h1>
-    <p>Submit any claim. CrawlConda searches 24 live sources, runs a 4-node AI pipeline, and returns a source-grounded verdict — pinned permanently to IPFS.</p>
+    <p>Submit any claim. CrawlConda searches 34 live sources, runs a 4-node AI pipeline, and returns a source-grounded verdict — pinned permanently to IPFS.</p>
   </div>
 
   <div class="search-box">
@@ -530,7 +530,7 @@
 <div class="page" id="page-about">
   <div class="about-section">
     <h2>Built for Truth</h2>
-    <p>CrawlConda is a source-grounded verification system. Submit any claim and it searches 24 live news feeds, extracts only facts explicitly stated in sources, and issues a verdict — pinned permanently to IPFS.</p>
+    <p>CrawlConda is a source-grounded verification system. Submit any claim and it searches 34 live news feeds, extracts only facts explicitly stated in sources, and issues a verdict — pinned permanently to IPFS.</p>
     <p>Every result is auditable. Every source is cited. Human votes run alongside every AI verdict, forever.</p>
   </div>
 
@@ -543,7 +543,7 @@
       </div>
       <div class="pipeline-step">
         <div class="step-num">2</div>
-        <div class="step-text"><strong>Search</strong> — 24 RSS feeds + Google News scanned, top 8 articles ranked by relevance</div>
+        <div class="step-text"><strong>Search</strong> — 34 RSS feeds + Google News scanned, top 8 articles ranked by relevance</div>
       </div>
       <div class="pipeline-step">
         <div class="step-num">3</div>
@@ -685,7 +685,7 @@
 
     btn.disabled    = true;
     btn.textContent = "Verifying...";
-    result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 24 sources and analysing…</div>`;
+    result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 34 sources and analysing…</div>`;
 
     try {
       const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`);

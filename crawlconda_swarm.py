@@ -102,25 +102,35 @@ RSS_FEEDS = [
     "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
     "http://rss.cnn.com/rss/edition_world.rss",
     "https://feeds.npr.org/1004/rss.xml",
+    "https://www.reuters.com/rssFeed/worldNews",
+    "https://www.independent.co.uk/news/world/rss",
     # Business / Economy
     "http://feeds.bbci.co.uk/news/business/rss.xml",
     "https://www.cnbc.com/id/100727362/device/rss/rss.html",
     "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
     "https://www.theguardian.com/business/rss",
+    "https://www.ft.com/?format=rss",
     # Technology
     "http://feeds.bbci.co.uk/news/technology/rss.xml",
     "https://techcrunch.com/feed/",
     "https://feeds.arstechnica.com/arstechnica/index",
     "https://www.theguardian.com/technology/rss",
+    "https://www.wired.com/feed/rss",
+    "https://www.theverge.com/rss/index.xml",
     # Science
     "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
     "https://www.sciencedaily.com/rss/top/science.xml",
     "https://www.theguardian.com/science/rss",
+    "https://www.nature.com/nature.rss",
     # US News
     "https://www.theguardian.com/us-news/rss",
+    "https://rss.nytimes.com/services/xml/rss/nyt/US.xml",
     # Sport
     "https://feeds.bbci.co.uk/sport/rss.xml",
     "https://www.espn.com/espn/rss/news",
+    # Health
+    "https://www.who.int/rss-feeds/news-english.xml",
+    "https://www.theguardian.com/society/health/rss",
 ]
 
 class State(TypedDict):
@@ -147,6 +157,13 @@ SOURCE_NAMES = {
     "feeds.arstechnica.com": "Ars Technica",
     "www.sciencedaily.com": "Science Daily",
     "www.espn.com": "ESPN",
+    "www.reuters.com": "Reuters",
+    "www.independent.co.uk": "The Independent",
+    "www.ft.com": "Financial Times",
+    "www.wired.com": "Wired",
+    "www.theverge.com": "The Verge",
+    "www.nature.com": "Nature",
+    "www.who.int": "WHO",
 }
 
 def log(msg: str):
@@ -169,9 +186,10 @@ def search_news(query: str) -> str:
             matched = 0
             for entry in feed.entries[:15]:
                 try:
+                    # Accept entries from last 90 days instead of 30
                     if (entry.get("published_parsed") and
                             time.time() - time.mktime(
-                                entry.published_parsed) > 86400 * 30):
+                                entry.published_parsed) > 86400 * 90):
                         continue
                 except (TypeError, ValueError, OverflowError):
                     pass  # malformed date — include the entry
@@ -306,16 +324,22 @@ def scanner_node(state: State):
     prompt = (
         f"Claim: {state['content'][:300]}\n\n"
         f"News sources retrieved:\n{plain[:2500]}\n\n"
-        f"Extract ONLY facts that are explicitly stated in the sources above. "
-        f"Do NOT add any outside knowledge. "
-        f"CRITICAL: Read EVERY headline literally as a fact. "
-        f"If a headline says 'X cuts output by 17%' — that means "
-        f"X happened and is a confirmed fact from that source. "
-        f"If a headline says 'Attack on Y' — Y was attacked, state it. "
-        f"Headlines are facts, not opinions. Extract them all. "
-        f"Max 4 bullet points, prioritize the most specific facts.\n"
+        f"FACT EXTRACTION RULES:\n"
+        f"1. Extract ONLY facts explicitly stated in the sources above.\n"
+        f"2. Do NOT add any outside knowledge or assumptions.\n"
+        f"3. Read EVERY headline literally as a reported fact.\n"
+        f"4. If multiple sources report the same fact, note this.\n"
+        f"5. If sources contradict each other, note both versions.\n"
+        f"6. Include the source name for each fact extracted.\n\n"
+        f"CRITICAL: Headlines are facts, not opinions. If a headline says "
+        f"'X cuts output by 17%' — that means X happened and is a confirmed "
+        f"fact from that source. If a headline says 'Attack on Y' — Y was "
+        f"attacked, state it with the source name.\n\n"
+        f"Format: Extract up to 6 bullet points, each with [SOURCE NAME] prefix.\n"
+        f"Example: [BBC] Iran launched missiles at Israeli bases.\n"
+        f"Example: [Reuters] Attack caused 17% reduction in LNG output.\n"
     )
-    scanned = get_llm().invoke(prompt).content[:600]
+    scanned = get_llm().invoke(prompt).content[:800]
     log(f"[SCANNER] → {scanned[:120]}")
     return {"scanned": scanned}
 
@@ -333,7 +357,7 @@ def verdict_node(state: State):
         return {
             "verdict": (
                 "VERDICT: UNCONFIRMED\n\n"
-                "REASONING: No sources were located across 24 monitored feeds "
+                "REASONING: No sources were located across 34 monitored feeds "
                 "for this claim. Cannot confirm or deny without source material.\n"
                 "KEY SOURCE: None"
             )
@@ -341,41 +365,46 @@ def verdict_node(state: State):
     plain = sources_for_llm(state["sources"])
     prompt = (
         f"You are a strict evidence-based fact-checker. "
-        f"Your only job is to determine if the SPECIFIC claim is "
+        f"Your job is to determine if the SPECIFIC claim is "
         f"directly answered by the sources provided.\n\n"
         f"Claim: {state['content'][:300]}\n\n"
         f"Facts extracted from sources:\n{state['scanned'][:800]}\n\n"
         f"Full sources:\n{plain[:2500]}\n\n"
-        f"STRICT RULES — read carefully:\n"
-        f"- CONFIRMED: Sources contain explicit evidence that "
-        f"the specific claim is true. This includes: direct reporting "
-        f"of the event, headlines that name the event, or articles "
-        f"that describe consequences of the event (damage reports, "
-        f"casualty counts, economic impact) — all of these confirm "
-        f"the event happened. The claim must be answerable YES.\n"
-        f"- PARTIALLY CONFIRMED: Sources directly address part of the "
-        f"claim but leave key parts unanswered or uncertain.\n"
-        f"- UNCONFIRMED: Sources exist on the topic but do NOT directly "
-        f"answer or address the specific claim being made. "
-        f"This is the correct verdict when sources discuss a related "
-        f"topic but do not confirm the specific assertion.\n"
-        f"- FALSE: Sources explicitly and directly contradict the claim.\n\n"
-        f"CRITICAL: Ask yourself — do the sources provide evidence "
-        f"this event occurred? A headline reporting consequences or "
-        f"outcomes of an event IS confirmation the event happened. "
-        f"Example: 'Attack cuts LNG output 17%' confirms an attack "
-        f"occurred even without saying 'attack confirmed'.\n"
-        f"Only use UNCONFIRMED when sources discuss the topic but "
-        f"provide zero evidence the specific event occurred.\n"
-        f"Example: Claim='Is Israel stopping the Iran war' + sources "
-        f"only about the war continuing = UNCONFIRMED.\n\n"
+        f"STRICT FACT-CHECKING RULES:\n"
+        f"1. CROSS-REFERENCE: Check if multiple independent sources "
+        f"report the same fact. Single-source claims are weaker.\n"
+        f"2. SOURCE CREDIBILITY: Prioritize established news outlets "
+        f"(BBC, Reuters, NYT, Guardian) over tabloids or blogs.\n"
+        f"3. CONTRADICTION CHECK: If sources contradict each other, "
+        f"note this explicitly and downgrade confidence.\n"
+        f"4. TEMPORAL ACCURACY: Check if the claim's timeframe "
+        f"matches source dates. 'Today' claims need recent sources.\n"
+        f"5. SPECIFICITY: Vague claims ('might', 'could', 'possibly') "
+        f"are UNCONFIRMED unless sources provide concrete evidence.\n\n"
+        f"VERDICT CRITERIA:\n"
+        f"- CONFIRMED: Multiple credible sources explicitly report "
+        f"the event with consistent details. Direct evidence exists.\n"
+        f"- PARTIALLY CONFIRMED: Some sources support parts of the claim "
+        f"but key details are missing, contradicted, or uncertain.\n"
+        f"- UNCONFIRMED: Sources exist on the topic but provide no "
+        f"direct evidence the specific event occurred. OR only one "
+        f"source reports it without corroboration.\n"
+        f"- FALSE: Multiple credible sources explicitly contradict "
+        f"the claim with evidence.\n\n"
+        f"CRITICAL ANALYSIS REQUIRED:\n"
+        f"- Count how many independent sources confirm the claim\n"
+        f"- Note any contradictions between sources\n"
+        f"- Assess source credibility (established outlets vs unknown)\n"
+        f"- Check if evidence is direct or circumstantial\n"
+        f"- Verify timeframes match the claim\n\n"
         f"Respond in exactly this format:\n"
         f"VERDICT: [CONFIRMED / PARTIALLY CONFIRMED / UNCONFIRMED / FALSE]\n"
-        f"REASONING: [1-2 sentences. Must cite what the source "
-        f"specifically says or does NOT say about the claim.]\n"
+        f"REASONING: [2-3 sentences. MUST include: (1) number of sources "
+        f"confirming, (2) any contradictions found, (3) source credibility "
+        f"assessment, (4) what specific evidence exists or is missing.]\n"
         f"KEY SOURCE: [exact headline, or 'None' if no direct source]"
     )
-    verdict = get_llm().invoke(prompt).content[:600]
+    verdict = get_llm().invoke(prompt).content[:800]
     log(f"[VERDICT] → {verdict[:120]}")
     return {"verdict": verdict}
 
