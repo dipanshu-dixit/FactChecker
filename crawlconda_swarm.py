@@ -638,53 +638,59 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 @bot.command()
 async def verify(ctx, *, text: str):
     log(f"[REQUEST] '{text[:80]}' from {ctx.author} in #{ctx.channel}")
-    status = await ctx.send("🔍  Expanding query...")
+    
+    # Create embed with progress tracker
+    embed = discord.Embed(
+        title="🔍 Verifying Claim",
+        description=text[:300],
+        color=0x7c6af7
+    )
+    embed.add_field(name="Progress", value="⟳ Expanding query...", inline=False)
+    embed.set_footer(text="CrawlConda · ~26s remaining")
+    status = await ctx.send(embed=embed)
+    
     try:
-        # Stage labels mirror the LangGraph pipeline nodes
-        async def update(msg): await status.edit(content=msg)
+        # Progress updates
+        steps = [
+            ("📡 Scanning 34 sources...", 3, 23),
+            ("🧠 Extracting facts...", 8, 15),
+            ("⚖️ Cross-referencing sources...", 13, 10),
+            ("✅ Issuing verdict...", 17, 6),
+            ("📦 Archiving to IPFS...", 20, 3)
+        ]
+        
+        async def update_progress(step_text, delay, remaining):
+            await asyncio.sleep(delay)
+            embed.set_field_at(0, name="Progress", value=step_text, inline=False)
+            embed.set_footer(text=f"CrawlConda · ~{remaining}s remaining")
+            try:
+                await status.edit(embed=embed)
+            except:
+                pass
+        
+        # Start progress updates in background
+        progress_tasks = []
+        for step_text, delay, remaining in steps:
+            task = asyncio.create_task(update_progress(step_text, delay, remaining))
+            progress_tasks.append(task)
 
-        # Patch each node to emit a stage update before it runs
-        _orig_searcher = searcher_node
-        _orig_scanner  = scanner_node
-        _orig_verdict  = verdict_node
-        _orig_publisher = publisher_node
-
-        async def _patched_searcher(state):
-            await update("📡  Scanning 24 sources...")
-            return _orig_searcher(state)
-        async def _patched_scanner(state):
-            await update("🧠  Extracting facts...")
-            return _orig_scanner(state)
-        async def _patched_verdict(state):
-            await update("⚖️  Issuing verdict...")
-            return _orig_verdict(state)
-
-        # Build a one-shot patched graph for this invocation
-        from langgraph.graph import StateGraph, END as _END
-        g = StateGraph(State)
-        g.add_node("Searcher",  _patched_searcher)
-        g.add_node("Scanner",   _patched_scanner)
-        g.add_node("Verdict",   _patched_verdict)
-        g.add_node("Publisher", _orig_publisher)
-        g.set_entry_point("Searcher")
-        g.add_edge("Searcher", "Scanner")
-        g.add_edge("Scanner",  "Verdict")
-        g.add_edge("Verdict",  "Publisher")
-        g.add_edge("Publisher", _END)
-        patched_swarm = g.compile()
-
+        
         # BUG 5 FIX: timeout wrapper to prevent Discord WebSocket drops
         try:
             raw = await asyncio.wait_for(
-                patched_swarm.ainvoke(
+                swarm.ainvoke(
                     {"content": text, "sources": "", "scanned": "", "verdict": "", "published": ""}
                 ),
                 timeout=120.0
             )
         except asyncio.TimeoutError:
-            await status.edit(
-                content="⚠️ Verification timed out after 2 minutes. Try a more specific claim."
-            )
+            # Cancel progress tasks
+            for task in progress_tasks:
+                task.cancel()
+            embed.color = 0xef4444
+            embed.set_field_at(0, name="Status", value="⚠️ Timed out after 2 minutes", inline=False)
+            embed.set_footer(text="Try a more specific claim")
+            await status.edit(embed=embed)
             return
         raw["ipfs"] = await pin_to_ipfs(raw)
         raw["content"] = text
@@ -699,6 +705,10 @@ async def verify(ctx, *, text: str):
                 "timestamp": datetime.now(tz=timezone.utc).isoformat()
             }]
         )
+
+        # Cancel progress tasks
+        for task in progress_tasks:
+            task.cancel()
 
         # SSE broadcast
         verdict_line = next((l for l in raw["published"].splitlines() if "VERDICT" in l.upper()), "")
@@ -716,7 +726,7 @@ async def verify(ctx, *, text: str):
         try:
             await status.delete()
         except Exception:
-            await status.edit(content="✓")
+            pass
         verdict_msg = await ctx.send(embed=embed)
         pending_votes[verdict_msg.id] = doc_id
         await verdict_msg.add_reaction("👍")
@@ -731,7 +741,13 @@ async def verify(ctx, *, text: str):
             }))
     except Exception as e:
         log(f"[ERROR] {e}")
-        await status.edit(content="⚠️ Something went wrong. Please try again.")
+        # Cancel progress tasks
+        for task in progress_tasks:
+            task.cancel()
+        embed.color = 0xef4444
+        embed.set_field_at(0, name="Status", value="⚠️ Something went wrong", inline=False)
+        embed.set_footer(text="Please try again")
+        await status.edit(embed=embed)
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)

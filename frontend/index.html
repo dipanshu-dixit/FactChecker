@@ -102,6 +102,73 @@
       margin: 0 auto 16px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    
+    /* PROGRESS TRACKER */
+    .progress-container {
+      width: 100%;
+      height: 4px;
+      background: #1a1a1a;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #7c6af7, #a89ff7);
+      transition: width 0.5s ease;
+      border-radius: 2px;
+    }
+    .progress-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+    .progress-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      background: #141414;
+      border-radius: 8px;
+      border-left: 3px solid #2a2a2a;
+      transition: all 0.3s;
+    }
+    .progress-step.active {
+      border-left-color: #7c6af7;
+      background: #1a1a1a;
+    }
+    .progress-step.done {
+      border-left-color: #22c55e;
+      opacity: 0.6;
+    }
+    .step-icon {
+      font-size: 1.2rem;
+      width: 24px;
+      text-align: center;
+    }
+    .progress-step.active .step-icon {
+      animation: rotate 1s linear infinite;
+    }
+    @keyframes rotate { to { transform: rotate(360deg); } }
+    .progress-step.done .step-icon {
+      color: #22c55e;
+    }
+    .step-text {
+      font-size: 0.9rem;
+      color: #888;
+    }
+    .progress-step.active .step-text {
+      color: #e8e8e8;
+      font-weight: 500;
+    }
+    .progress-time {
+      font-size: 0.85rem;
+      color: #666;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
 
     /* VERDICT CARD */
     .verdict-card {
@@ -685,10 +752,71 @@
 
     btn.disabled    = true;
     btn.textContent = "Verifying...";
-    result.innerHTML = `<div class="status"><div class="spinner"></div>Searching 34 sources and analysing…</div>`;
+    
+    // Progress tracker
+    let progress = [
+      { step: 'Expanding query...', done: false, time: 3 },
+      { step: 'Searching 34 sources...', done: false, time: 8 },
+      { step: 'Extracting facts...', done: false, time: 5 },
+      { step: 'Cross-referencing sources...', done: false, time: 4 },
+      { step: 'Issuing verdict...', done: false, time: 3 },
+      { step: 'Archiving to IPFS...', done: false, time: 3 }
+    ];
+    
+    let currentStep = 0;
+    let elapsed = 0;
+    const totalTime = progress.reduce((sum, p) => sum + p.time, 0);
+    
+    function updateProgress() {
+      const current = progress[currentStep];
+      const completed = progress.filter(p => p.done).length;
+      const percent = Math.min(95, Math.round((elapsed / totalTime) * 100));
+      
+      const progressHtml = `
+        <div class="status">
+          <div class="progress-container">
+            <div class="progress-bar" style="width: ${percent}%"></div>
+          </div>
+          <div class="progress-steps">
+            ${progress.map((p, i) => `
+              <div class="progress-step ${p.done ? 'done' : ''} ${i === currentStep ? 'active' : ''}">
+                <span class="step-icon">${p.done ? '✓' : (i === currentStep ? '⟳' : '○')}</span>
+                <span class="step-text">${p.step}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div class="progress-time">~${Math.max(0, totalTime - elapsed)}s remaining</div>
+        </div>
+      `;
+      result.innerHTML = progressHtml;
+    }
+    
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      elapsed++;
+      
+      // Move to next step based on time
+      let timeSum = 0;
+      for (let i = 0; i < progress.length; i++) {
+        timeSum += progress[i].time;
+        if (elapsed < timeSum) {
+          if (i > currentStep) {
+            progress[currentStep].done = true;
+            currentStep = i;
+          }
+          break;
+        }
+      }
+      
+      updateProgress();
+    }, 1000);
+    
+    updateProgress();
 
     try {
       const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`);
+      clearInterval(progressInterval);
+      
       if (!res.ok) {
         if (res.status === 429) {
           result.innerHTML = `<div class="error-msg">⚠️ Rate limit exceeded. Please wait a few minutes before trying again.</div>`;
@@ -699,9 +827,19 @@
         }
         return;
       }
-      const data = await res.json();
-      result.innerHTML = renderVerdictCard(data, true);
+      
+      // Mark all as done
+      progress.forEach(p => p.done = true);
+      updateProgress();
+      
+      setTimeout(() => {
+        const data = res.json();
+        data.then(d => {
+          result.innerHTML = renderVerdictCard(d, true);
+        });
+      }, 500);
     } catch (e) {
+      clearInterval(progressInterval);
       console.error('Verification error:', e);
       result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
     }
