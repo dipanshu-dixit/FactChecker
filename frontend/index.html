@@ -1056,7 +1056,12 @@
       _activeSSE.close();
       _activeSSE = null;
     }
-    const es = new EventSource(`${API}/stream`);
+    
+    const sseUrl = window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')
+      ? 'http://localhost:8000/stream'
+      : '/api/stream';
+    
+    const es = new EventSource(sseUrl);
     _activeSSE = es;
 
     es.addEventListener("open", () => {
