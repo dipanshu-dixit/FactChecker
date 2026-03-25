@@ -98,7 +98,7 @@ Interactive docs: `http://localhost:8000/docs`
 
 ## Live Demo
 
-Join the Discord server: [discord.gg/4hX4f7cu](https://discord.gg/4hX4f7cu)
+Join the Discord server: [discord.gg/4hX4f7cu](https://discord.gg/ve3G7vfHNm)
 
 ## Full Documentation
 
