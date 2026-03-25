@@ -13,15 +13,22 @@ export default async function handler(req, res) {
       body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
     });
     
-    const data = await response.text();
+    const contentType = response.headers.get('content-type') || 'application/json';
     
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+    res.setHeader('Content-Type', contentType);
     
-    res.status(response.status).send(data);
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } else {
+      const data = await response.text();
+      res.status(response.status).send(data);
+    }
   } catch (error) {
+    console.error('Proxy error:', error);
     res.status(500).json({ error: 'Proxy error', message: error.message });
   }
 }
