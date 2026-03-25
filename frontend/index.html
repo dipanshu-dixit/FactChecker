@@ -581,60 +581,46 @@
 </div>
 
 <script>
-  // Auto-detect API URL based on environment with fallback
+  // Auto-detect API URL based on environment with DNS bypass
   const API_URLS = [
     'https://factchecker-production-3945.up.railway.app',
-    'https://api-production-241e.up.railway.app'
-  ];
+    'https://api-production-241e.up.railway.app',
+    window.location.hostname === 'localhost' ? 'http://localhost:8000' : null
+  ].filter(Boolean);
   
   let API = window.location.hostname === 'localhost' ||
             window.location.hostname.includes('127.0.0.1')
     ? 'http://localhost:8000'
-    : (window.API_URL || API_URLS[0]);
+    : API_URLS[0];
   
   let currentAPIIndex = 0;
   
-  // Test API connectivity and switch to fallback if needed
-  async function getWorkingAPI() {
+  // Enhanced fetch with automatic fallback and timeout
+  async function apiFetch(endpoint, options = {}) {
+    const timeout = 5000;
+    
     for (let i = 0; i < API_URLS.length; i++) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(`${API_URLS[i]}/verdicts?limit=1`, {
-          signal: controller.signal,
-          method: 'HEAD'
-        });
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        const url = `${API_URLS[currentAPIIndex]}${endpoint}`;
+        const res = await fetch(url, { ...options, signal: controller.signal });
         clearTimeout(timeoutId);
-        if (res.ok || res.status === 404) {
-          currentAPIIndex = i;
-          return API_URLS[i];
+        
+        if (res.ok || (res.status >= 400 && res.status < 500)) {
+          API = API_URLS[currentAPIIndex];
+          return res;
         }
-      } catch (e) {
-        continue;
-      }
-    }
-    return API_URLS[0];
-  }
-  
-  // Enhanced fetch with automatic fallback
-  async function apiFetch(endpoint, options = {}) {
-    let lastError;
-    for (let attempt = 0; attempt < API_URLS.length; attempt++) {
-      try {
-        const url = `${API}${endpoint}`;
-        const res = await fetch(url, options);
-        if (res.ok) return res;
-        if (res.status >= 400 && res.status < 500) return res;
         throw new Error(`HTTP ${res.status}`);
       } catch (e) {
-        lastError = e;
-        if (attempt < API_URLS.length - 1) {
+        if (i < API_URLS.length - 1) {
           currentAPIIndex = (currentAPIIndex + 1) % API_URLS.length;
-          API = API_URLS[currentAPIIndex];
+          continue;
         }
+        throw e;
       }
     }
-    throw lastError;
   }
 
   // CLEANED: VERDICT_ORDER defined once as constant
