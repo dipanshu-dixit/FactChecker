@@ -585,6 +585,7 @@
   const API_URLS = [
     'https://factchecker-production-3945.up.railway.app',
     'https://api-production-241e.up.railway.app',
+    'https://corsproxy.io/?https://factchecker-production-3945.up.railway.app',
     window.location.hostname === 'localhost' ? 'http://localhost:8000' : null
   ].filter(Boolean);
   
@@ -597,7 +598,7 @@
   
   // Enhanced fetch with automatic fallback and timeout
   async function apiFetch(endpoint, options = {}) {
-    const timeout = 5000;
+    const timeout = 8000;
     
     for (let i = 0; i < API_URLS.length; i++) {
       try {
@@ -611,16 +612,17 @@
         
         if (res.ok || (res.status >= 400 && res.status < 500)) {
           API = API_URLS[currentAPIIndex];
-          console.log(`[API] Success: ${API}`);
+          console.log(`[API] ✓ Connected: ${API}`);
           return res;
         }
         throw new Error(`HTTP ${res.status}`);
       } catch (e) {
-        console.error(`[API] Failed: ${API_URLS[currentAPIIndex]} - ${e.message}`);
+        console.error(`[API] ✗ Failed: ${API_URLS[currentAPIIndex]} - ${e.message}`);
         if (i < API_URLS.length - 1) {
           currentAPIIndex = (currentAPIIndex + 1) % API_URLS.length;
           continue;
         }
+        console.error('[API] All endpoints failed. Your network may be blocking Railway domains.');
         throw e;
       }
     }
