@@ -11,6 +11,7 @@ import time
 import re
 import os
 import logging
+from typing import Optional
 
 # Configure logging
 logging.basicConfig(
@@ -29,6 +30,8 @@ def normalize_claim(claim: str) -> str:
 
 from sse_starlette.sse import EventSourceResponse
 from crawlconda_swarm import run_swarm, VERDICT_EMOJI
+from api_keys import APIKeyManager
+from badge_generator import generate_badge_svg, generate_badge_html, generate_badge_markdown
 
 DISCORD_VERIFIED_WEBHOOK = os.getenv("DISCORD_VERIFIED_WEBHOOK", "")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
@@ -82,6 +85,9 @@ chroma = chromadb.PersistentClient(
 )  # CLEANED: use constant
 verdicts_col = chroma.get_or_create_collection(COL_VERDICTS)  # CLEANED: use constant
 votes_col = chroma.get_or_create_collection(COL_VOTES)  # CLEANED: use constant
+
+# Initialize API key manager
+api_key_manager = APIKeyManager(chroma)
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 _rate_store: defaultdict[str, list[float]] = defaultdict(list)
@@ -259,28 +265,69 @@ class VoteRequest(BaseModel):
     vote: str       # "up" or "down"
     user_id: str
 
+class APIKeyRequest(BaseModel):
+    name: str
+    email: str
+    use_case: str = ""  # Optional description
+
+
+# ── Helper: Extract API key from header ──────────────────────────────────────
+def get_api_key(authorization: str = Header(default="")) -> Optional[str]:
+    """Extract API key from Authorization header.
+    
+    Accepts: 'Bearer cc_live_...' or 'cc_live_...'
+    """
+    if not authorization:
+        return None
+    
+    # Strip 'Bearer ' prefix if present
+    if authorization.startswith("Bearer "):
+        return authorization[7:].strip()
+    
+    return authorization.strip() if authorization.startswith("cc_live_") else None
+
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 @app.get("/verify")
-async def verify(claim: str, request: Request):
+async def verify(claim: str, request: Request, authorization: str = Header(default="")):
     # ── 1. Minimum length ──────────────────────────────────────────────────────
     if len(claim.strip()) < 8:
         raise HTTPException(status_code=400, detail="Claim too short. Please enter at least 8 characters.")
 
-    # ── 2. Rate limit ──────────────────────────────────────────────────────────
-    ip = request.headers.get(
-        "x-forwarded-for", request.client.host
-    ).split(",")[0].strip()
-    now = time.time()
-    _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]  # CLEANED: use constant
-    # Periodically purge IPs with no recent requests
-    if len(_rate_store) > 1000:
-        stale = [k for k, v in _rate_store.items() if not v]
-        for k in stale:
-            del _rate_store[k]
-    if len(_rate_store[ip]) >= RATE_LIMIT:  # CLEANED: use constant
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 5 verifications per hour per IP.")
-    _rate_store[ip].append(now)
+    # ── 2. Check for API key (higher rate limit) ──────────────────────────────
+    api_key = get_api_key(authorization)
+    if api_key:
+        # Validate API key
+        key_meta = api_key_manager.validate_key(api_key)
+        if not key_meta:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        
+        # Check API key rate limit
+        if not api_key_manager.increment_usage(api_key):
+            tier = key_meta.get("tier", "free")
+            limit = 1000 if tier == "pro" else 100
+            raise HTTPException(
+                status_code=429,
+                detail=f"API key rate limit exceeded. {tier.title()} tier: {limit} requests/day"
+            )
+        
+        # Skip IP rate limit for valid API keys
+        logger.info(f"[API_KEY] Request from {key_meta.get('name', 'unknown')}")
+    else:
+        # ── 3. IP-based rate limit (no API key) ───────────────────────────────
+        ip = request.headers.get(
+            "x-forwarded-for", request.client.host
+        ).split(",")[0].strip()
+        now = time.time()
+        _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]  # CLEANED: use constant
+        # Periodically purge IPs with no recent requests
+        if len(_rate_store) > 1000:
+            stale = [k for k, v in _rate_store.items() if not v]
+            for k in stale:
+                del _rate_store[k]
+        if len(_rate_store[ip]) >= RATE_LIMIT:  # CLEANED: use constant
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 5 verifications per hour per IP. Get an API key for higher limits.")
+        _rate_store[ip].append(now)
 
     # ── 3. Duplicate-claim cache (metadata index lookup — O(1)) ───────────────
     claim_key = normalize_claim(claim)
@@ -516,6 +563,239 @@ def trending():
 @app.get("/activity")
 def get_activity():
     return {"events": list(reversed(_activity_log))}
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring."""
+    try:
+        # Test ChromaDB
+        verdicts_col.get(limit=1)
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "components": {
+                "api": "ok",
+                "database": "ok",
+                "sse_clients": len(_sse_clients)
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Unhealthy: {str(e)}")
+
+
+# ── API Key Management ────────────────────────────────────────────────────────
+@app.post("/api-keys/generate")
+async def generate_api_key(body: APIKeyRequest):
+    """Generate a new API key.
+    
+    Free tier: 100 requests/day
+    
+    Request body:
+    {
+      "name": "Your Name or Organization",
+      "email": "your@email.com",
+      "use_case": "Optional: describe your use case"
+    }
+    """
+    # Validate inputs
+    if not body.name or len(body.name) < 2:
+        raise HTTPException(status_code=400, detail="Name must be at least 2 characters")
+    
+    if not body.email or "@" not in body.email:
+        raise HTTPException(status_code=400, detail="Valid email required")
+    
+    # Generate key
+    try:
+        api_key = api_key_manager.generate_key(
+            name=body.name,
+            email=body.email,
+            tier="free"
+        )
+        
+        logger.info(f"[API_KEY] Generated for {body.name} ({body.email})")
+        
+        return {
+            "api_key": api_key,
+            "tier": "free",
+            "daily_limit": 100,
+            "message": "Save this key securely. It will not be shown again.",
+            "usage": f"Add header: Authorization: Bearer {api_key}"
+        }
+    except Exception as e:
+        logger.error(f"[API_KEY] Generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate API key")
+
+
+@app.get("/api-keys/usage")
+async def get_api_key_usage(authorization: str = Header(default="")):
+    """Get usage statistics for your API key.
+    
+    Requires: Authorization header with your API key
+    """
+    api_key = get_api_key(authorization)
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key required in Authorization header")
+    
+    usage = api_key_manager.get_usage(api_key)
+    if not usage:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    return usage
+
+
+# ── Badge Generation ──────────────────────────────────────────────────────────
+@app.get("/badge/{ipfs_hash}.svg")
+async def get_badge_svg(ipfs_hash: str):
+    """Generate SVG badge for a verified claim."""
+    from fastapi.responses import Response
+    
+    # Fetch verdict
+    results = verdicts_col.get(ids=[ipfs_hash])
+    if not results["ids"]:
+        raise HTTPException(status_code=404, detail="Verdict not found")
+    
+    data = json.loads(results["documents"][0])
+    
+    # Extract verdict and claim
+    published = data.get("published", "")
+    verdict_line = next((l for l in published.splitlines() if "VERDICT" in l.upper()), "")
+    verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+    claim = data.get("claim") or data.get("content", "Unknown claim")
+    
+    # Generate SVG
+    svg = generate_badge_svg(verdict_key, claim)
+    
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+            "Content-Disposition": f'inline; filename="crawlconda-{ipfs_hash[:8]}.svg"'
+        }
+    )
+
+
+@app.get("/badge/{ipfs_hash}/embed")
+async def get_badge_embed(ipfs_hash: str):
+    """Get HTML/Markdown embed codes for a badge."""
+    # Fetch verdict
+    results = verdicts_col.get(ids=[ipfs_hash])
+    if not results["ids"]:
+        raise HTTPException(status_code=404, detail="Verdict not found")
+    
+    data = json.loads(results["documents"][0])
+    
+    # Extract verdict and claim
+    published = data.get("published", "")
+    verdict_line = next((l for l in published.splitlines() if "VERDICT" in l.upper()), "")
+    verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+    claim = data.get("claim") or data.get("content", "Unknown claim")
+    
+    # Generate embed codes
+    html = generate_badge_html(ipfs_hash, verdict_key, claim, WEB_URL)
+    markdown = generate_badge_markdown(ipfs_hash, verdict_key, WEB_URL)
+    
+    return {
+        "ipfs_hash": ipfs_hash,
+        "verdict": verdict_key,
+        "claim": claim,
+        "badge_url": f"{WEB_URL}/badge/{ipfs_hash}.svg",
+        "embed": {
+            "html": html,
+            "markdown": markdown,
+            "url": f"{WEB_URL}/#/v/{ipfs_hash}"
+        }
+    }
+
+
+# ── Claim Page with OG Tags ──────────────────────────────────────────────────
+@app.get("/claim/{ipfs_hash}")
+async def get_claim_page(ipfs_hash: str):
+    """Serve HTML page with Open Graph meta tags for social sharing."""
+    from fastapi.responses import HTMLResponse
+    
+    # Fetch verdict
+    results = verdicts_col.get(ids=[ipfs_hash])
+    if not results["ids"]:
+        raise HTTPException(status_code=404, detail="Verdict not found")
+    
+    data = json.loads(results["documents"][0])
+    
+    # Extract data
+    published = data.get("published", "")
+    verdict_line = next((l for l in published.splitlines() if "VERDICT" in l.upper()), "")
+    verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+    claim = data.get("claim") or data.get("content", "Unknown claim")
+    summary = published.replace(verdict_line, "").strip()[:200]
+    
+    # Get vote counts
+    votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
+    up = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
+    down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
+    
+    # Generate HTML with OG tags
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Primary Meta Tags -->
+  <title>{verdict_key}: {claim[:60]}</title>
+  <meta name="title" content="{verdict_key}: {claim[:60]}">
+  <meta name="description" content="{summary}">
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="{WEB_URL}/claim/{ipfs_hash}">
+  <meta property="og:title" content="{verdict_key}: {claim[:60]}">
+  <meta property="og:description" content="{summary}">
+  <meta property="og:image" content="{WEB_URL}/badge/{ipfs_hash}.svg">
+  <meta property="og:site_name" content="CrawlConda">
+  
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="{WEB_URL}/claim/{ipfs_hash}">
+  <meta property="twitter:title" content="{verdict_key}: {claim[:60]}">
+  <meta property="twitter:description" content="{summary}">
+  <meta property="twitter:image" content="{WEB_URL}/badge/{ipfs_hash}.svg">
+  
+  <!-- Redirect to main app -->
+  <meta http-equiv="refresh" content="0; url={WEB_URL}/#/v/{ipfs_hash}">
+  
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d0d;
+      color: #e8e8e8;
+      padding: 40px 20px;
+      text-align: center;
+    }}
+    .container {{
+      max-width: 600px;
+      margin: 0 auto;
+    }}
+    h1 {{ color: #7c6af7; }}
+    .votes {{ color: #888; margin-top: 20px; }}
+    a {{ color: #7c6af7; text-decoration: none; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CrawlConda Verified</h1>
+    <p><strong>{verdict_key}</strong></p>
+    <p>{claim}</p>
+    <p>{summary}</p>
+    <div class="votes">↑ {up} · ↓ {down}</div>
+    <p style="margin-top: 40px;">
+      <a href="{WEB_URL}/#/v/{ipfs_hash}">View full verification →</a>
+    </p>
+  </div>
+</body>
+</html>'''
+    
+    return HTMLResponse(content=html)
 
 
 @app.get("/health")

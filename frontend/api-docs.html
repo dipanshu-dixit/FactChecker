@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrawlConda API Documentation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d0d;
+      color: #e8e8e8;
+      line-height: 1.6;
+    }
+    
+    header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 24px;
+      text-align: center;
+    }
+    
+    header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 8px;
+    }
+    
+    header h1 span { color: #7c6af7; }
+    
+    header p {
+      color: #888;
+      font-size: 1rem;
+    }
+    
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+    
+    section {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 32px;
+      margin-bottom: 32px;
+    }
+    
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #7c6af7;
+    }
+    
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-top: 24px;
+      margin-bottom: 12px;
+      color: #e8e8e8;
+    }
+    
+    p {
+      color: #ccc;
+      margin-bottom: 16px;
+    }
+    
+    .endpoint {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    
+    .method {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      margin-right: 12px;
+      font-family: monospace;
+    }
+    
+    .method.get { background: #22c55e; color: #000; }
+    .method.post { background: #3b82f6; color: #fff; }
+    
+    .path {
+      font-family: monospace;
+      font-size: 1rem;
+      color: #e8e8e8;
+    }
+    
+    .description {
+      color: #888;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+    
+    pre {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 0.9rem;
+      margin: 12px 0;
+    }
+    
+    code {
+      font-family: 'Courier New', monospace;
+      color: #a89ff7;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    
+    .badge.free { background: #22c55e; color: #000; }
+    .badge.auth { background: #f97316; color: #fff; }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    
+    th {
+      color: #7c6af7;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    
+    td {
+      color: #ccc;
+      font-size: 0.9rem;
+    }
+    
+    .try-it {
+      background: #7c6af7;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+    
+    .try-it:hover {
+      background: #6a58e0;
+    }
+    
+    .key-form {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 24px;
+      margin-top: 16px;
+    }
+    
+    .key-form input {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 12px;
+      color: #e8e8e8;
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    
+    .key-form input:focus {
+      outline: none;
+      border-color: #7c6af7;
+    }
+    
+    .key-result {
+      background: #0a0a0a;
+      border: 1px solid #22c55e;
+      border-radius: 6px;
+      padding: 16px;
+      margin-top: 16px;
+      display: none;
+    }
+    
+    .key-result.show {
+      display: block;
+    }
+    
+    .key-result code {
+      color: #22c55e;
+      word-break: break-all;
+    }
+    
+    .warning {
+      background: #1a0a0a;
+      border: 1px solid #f97316;
+      border-radius: 6px;
+      padding: 12px 16px;
+      color: #f97316;
+      font-size: 0.9rem;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Crawl<span>Conda</span> API</h1>
+  <p>Programmatic access to the Ground Truth Engine</p>
+</header>
+
+<div class="container">
+  
+  <!-- Getting Started -->
+  <section>
+    <h2>🚀 Getting Started</h2>
+    <p>The CrawlConda API allows you to verify claims programmatically, retrieve past verdicts, and embed verification badges on your website.</p>
+    
+    <h3>Base URL</h3>
+    <pre><code>https://factchecker-production-3945.up.railway.app</code></pre>
+    
+    <h3>Rate Limits</h3>
+    <table>
+      <tr>
+        <th>Tier</th>
+        <th>Limit</th>
+        <th>Cost</th>
+      </tr>
+      <tr>
+        <td>No API Key (IP-based)</td>
+        <td>5 requests/hour</td>
+        <td>Free</td>
+      </tr>
+      <tr>
+        <td>Free API Key</td>
+        <td>100 requests/day</td>
+        <td>Free</td>
+      </tr>
+      <tr>
+        <td>Pro API Key</td>
+        <td>1,000 requests/day</td>
+        <td>Contact us</td>
+      </tr>
+    </table>
+  </section>
+  
+  <!-- Generate API Key -->
+  <section>
+    <h2>🔑 Generate API Key</h2>
+    <p>Get a free API key for 100 requests per day. No credit card required.</p>
+    
+    <div class="key-form">
+      <input type="text" id="key-name" placeholder="Your name or organization" />
+      <input type="email" id="key-email" placeholder="your@email.com" />
+      <input type="text" id="key-usecase" placeholder="Use case (optional)" />
+      <button class="try-it" onclick="generateKey()">Generate API Key</button>
+      
+      <div class="key-result" id="key-result">
+        <p><strong>Your API Key:</strong></p>
+        <pre><code id="key-value"></code></pre>
+        <p class="warning">⚠️ Save this key securely. It will not be shown again.</p>
+        <p style="margin-top: 12px; color: #888; font-size: 0.9rem;">
+          Add to your requests:<br>
+          <code>Authorization: Bearer YOUR_API_KEY</code>
+        </p>
+      </div>
+    </div>
+  </section>
+  
+  <!-- Endpoints -->
+  <section>
+    <h2>📡 API Endpoints</h2>
+    
+    <!-- Verify Claim -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/verify</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">Verify a claim by searching 34 live news sources and issuing a verdict.</p>
+      
+      <h3>Query Parameters</h3>
+      <table>
+        <tr>
+          <th>Parameter</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+        <tr>
+          <td><code>claim</code></td>
+          <td>string</td>
+          <td>The claim to verify (min 8 characters)</td>
+        </tr>
+      </table>
+      
+      <h3>Headers (Optional)</h3>
+      <pre><code>Authorization: Bearer YOUR_API_KEY</code></pre>
+      
+      <h3>Example Request</h3>
+      <pre><code>curl "https://factchecker-production-3945.up.railway.app/verify?claim=Iran%20struck%20Qatar%20gas%20facilities" \
+  -H "Authorization: Bearer cc_live_..."</code></pre>
+      
+      <h3>Example Response</h3>
+      <pre><code>{
+  "claim": "Iran struck Qatar gas facilities",
+  "verdict": "CONFIRMED",
+  "emoji": "✅",
+  "summary": "Multiple sources confirm the attack...",
+  "sources": [
+    {
+      "title": "Iran Attacks Qatar LNG Facility",
+      "url": "https://...",
+      "source": "BBC"
+    }
+  ],
+  "ipfs_hash": "QmXxx...",
+  "ipfs_url": "https://gateway.pinata.cloud/ipfs/QmXxx...",
+  "timestamp": "2026-03-26T10:30:00Z"
+}</code></pre>
+    </div>
+    
+    <!-- Get Verdict -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/verdict/{ipfs_hash}</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">Retrieve a specific verdict by its IPFS hash.</p>
+      
+      <h3>Example Request</h3>
+      <pre><code>curl "https://factchecker-production-3945.up.railway.app/verdict/QmXxx..."</code></pre>
+    </div>
+    
+    <!-- List Verdicts -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/verdicts</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">List recent verdicts (up to 200).</p>
+      
+      <h3>Query Parameters</h3>
+      <table>
+        <tr>
+          <th>Parameter</th>
+          <th>Type</th>
+          <th>Default</th>
+        </tr>
+        <tr>
+          <td><code>limit</code></td>
+          <td>integer</td>
+          <td>20 (max 200)</td>
+        </tr>
+      </table>
+    </div>
+    
+    <!-- Trending -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/trending</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">Get top 5 most-voted verdicts in the last 24 hours.</p>
+    </div>
+    
+    <!-- Vote -->
+    <div class="endpoint">
+      <div>
+        <span class="method post">POST</span>
+        <span class="path">/confirm/{ipfs_hash}</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">Cast a vote (up/down) on a verdict.</p>
+      
+      <h3>Request Body</h3>
+      <pre><code>{
+  "vote": "up",  // or "down"
+  "user_id": "your_unique_id"
+}</code></pre>
+    </div>
+    
+    <!-- Badge SVG -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/badge/{ipfs_hash}.svg</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">Get a "Verified by CrawlConda" SVG badge for embedding.</p>
+      
+      <h3>Example</h3>
+      <pre><code>&lt;img src="https://factchecker-production-3945.up.railway.app/badge/QmXxx.svg" alt="Verified" /&gt;</code></pre>
+    </div>
+    
+    <!-- Badge Embed -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/badge/{ipfs_hash}/embed</span>
+        <span class="badge free">FREE</span>
+      </div>
+      <p class="description">Get HTML and Markdown embed codes for a badge.</p>
+      
+      <h3>Response</h3>
+      <pre><code>{
+  "badge_url": "https://.../badge/QmXxx.svg",
+  "embed": {
+    "html": "&lt;a href=\"...\"&gt;&lt;img src=\"...\" /&gt;&lt;/a&gt;",
+    "markdown": "[![Verified](...)](...)",
+    "url": "https://fact-checker-teal.vercel.app/#/v/QmXxx"
+  }
+}</code></pre>
+    </div>
+    
+    <!-- API Key Usage -->
+    <div class="endpoint">
+      <div>
+        <span class="method get">GET</span>
+        <span class="path">/api-keys/usage</span>
+        <span class="badge auth">AUTH</span>
+      </div>
+      <p class="description">Check your API key usage statistics.</p>
+      
+      <h3>Headers</h3>
+      <pre><code>Authorization: Bearer YOUR_API_KEY</code></pre>
+      
+      <h3>Response</h3>
+      <pre><code>{
+  "tier": "free",
+  "requests_today": 42,
+  "daily_limit": 100,
+  "total_requests": 1337,
+  "created_at": "2026-03-26T10:00:00Z"
+}</code></pre>
+    </div>
+  </section>
+  
+  <!-- Error Codes -->
+  <section>
+    <h2>⚠️ Error Codes</h2>
+    <table>
+      <tr>
+        <th>Code</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td>400</td>
+        <td>Bad Request - Invalid parameters</td>
+      </tr>
+      <tr>
+        <td>401</td>
+        <td>Unauthorized - Invalid API key</td>
+      </tr>
+      <tr>
+        <td>404</td>
+        <td>Not Found - Verdict doesn't exist</td>
+      </tr>
+      <tr>
+        <td>429</td>
+        <td>Rate Limit Exceeded - Wait or upgrade</td>
+      </tr>
+      <tr>
+        <td>503</td>
+        <td>Service Unavailable - Try again later</td>
+      </tr>
+    </table>
+  </section>
+  
+  <!-- Support -->
+  <section>
+    <h2>💬 Support</h2>
+    <p>Need help or want to upgrade to Pro?</p>
+    <ul style="color: #888; margin-left: 20px;">
+      <li>Discord: <a href="https://discord.gg/jvzaKkvJM2" style="color: #7c6af7;">discord.gg/jvzaKkvJM2</a></li>
+      <li>GitHub: <a href="https://github.com/dipanshu-dixit/FactChecker" style="color: #7c6af7;">github.com/dipanshu-dixit/FactChecker</a></li>
+      <li>Web: <a href="https://fact-checker-teal.vercel.app" style="color: #7c6af7;">fact-checker-teal.vercel.app</a></li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+  const API_BASE = 'https://factchecker-production-3945.up.railway.app';
+  
+  async function generateKey() {
+    const name = document.getElementById('key-name').value.trim();
+    const email = document.getElementById('key-email').value.trim();
+    const useCase = document.getElementById('key-usecase').value.trim();
+    
+    if (!name || !email) {
+      alert('Please enter your name and email');
+      return;
+    }
+    
+    if (!email.includes('@')) {
+      alert('Please enter a valid email');
+      return;
+    }
+    
+    try {
+      const res = await fetch(`${API_BASE}/api-keys/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, use_case: useCase })
+      });
+      
+      if (!res.ok) {
+        const err = await res.json();
+        alert('Error: ' + (err.detail || 'Failed to generate key'));
+        return;
+      }
+      
+      const data = await res.json();
+      document.getElementById('key-value').textContent = data.api_key;
+      document.getElementById('key-result').classList.add('show');
+    } catch (e) {
+      alert('Network error: ' + e.message);
+    }
+  }
+</script>
+
+</body>
+</html>
