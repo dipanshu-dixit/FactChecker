@@ -751,12 +751,12 @@
     
     // Progress tracker
     let progress = [
-      { step: 'Expanding query...', done: false, time: 3 },
-      { step: 'Searching 34 sources...', done: false, time: 8 },
-      { step: 'Extracting facts...', done: false, time: 5 },
-      { step: 'Cross-referencing sources...', done: false, time: 4 },
-      { step: 'Issuing verdict...', done: false, time: 3 },
-      { step: 'Archiving to IPFS...', done: false, time: 3 }
+      { step: 'Expanding query...', done: false, time: 4 },
+      { step: 'Searching 34 sources...', done: false, time: 18 },
+      { step: 'Extracting facts...', done: false, time: 8 },
+      { step: 'Cross-referencing sources...', done: false, time: 7 },
+      { step: 'Issuing verdict...', done: false, time: 5 },
+      { step: 'Archiving to IPFS...', done: false, time: 15 }
     ];
     
     let currentStep = 0;
@@ -787,21 +787,26 @@
       result.innerHTML = progressHtml;
     }
     
-    // Simulate progress
+    // Simulate progress with more accurate timing
     const progressInterval = setInterval(() => {
       elapsed++;
       
-      // Move to next step based on time
+      // Move to next step based on accumulated time
       let timeSum = 0;
       for (let i = 0; i < progress.length; i++) {
         timeSum += progress[i].time;
-        if (elapsed < timeSum) {
+        if (elapsed <= timeSum) {
           if (i > currentStep) {
             progress[currentStep].done = true;
             currentStep = i;
           }
           break;
         }
+      }
+      
+      // If we've exceeded total time, stay on last step
+      if (elapsed > totalTime) {
+        currentStep = progress.length - 1;
       }
       
       updateProgress();
