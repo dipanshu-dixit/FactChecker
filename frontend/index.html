@@ -659,6 +659,9 @@
       : '/api/proxy?path='
   ].filter(Boolean);
   
+  // Use direct Railway URL for /verify to avoid Vercel 60s timeout
+  const RAILWAY_API = 'https://factchecker-production-3945.up.railway.app';
+  
   let API = window.location.hostname === 'localhost' ||
             window.location.hostname.includes('127.0.0.1')
     ? 'http://localhost:8000'
@@ -668,9 +671,14 @@
   
   // Enhanced fetch with automatic fallback and timeout
   async function apiFetch(endpoint, options = {}) {
-    // Use longer timeout for /verify endpoint (120s), shorter for others (15s)
-    const timeout = endpoint.includes('/verify?') ? 120000 : 15000;
-    const url = `${API}${endpoint}`;
+    // CRITICAL FIX: Use direct Railway URL for /verify to bypass Vercel 60s limit
+    const isVerify = endpoint.includes('/verify?');
+    const timeout = isVerify ? 120000 : 15000;
+    
+    // For verify endpoint, try Railway direct first, then fall back to proxy
+    const url = isVerify && window.location.hostname !== 'localhost'
+      ? `${RAILWAY_API}${endpoint}`
+      : `${API}${endpoint}`;
     
     try {
       const controller = new AbortController();
@@ -687,6 +695,27 @@
       throw new Error(`HTTP ${res.status}`);
     } catch (e) {
       console.error(`[API] ✗ Failed: ${e.message}`);
+      
+      // If direct Railway failed and we haven't tried proxy yet, try proxy
+      if (isVerify && url.includes('railway.app') && e.name !== 'AbortError') {
+        console.log(`[API] Retrying via proxy...`);
+        const proxyUrl = `/api/proxy?path=${endpoint}`;
+        try {
+          const controller2 = new AbortController();
+          const timeoutId2 = setTimeout(() => controller2.abort(), 60000); // Proxy has 60s limit
+          
+          const res = await fetch(proxyUrl, { ...options, signal: controller2.signal });
+          clearTimeout(timeoutId2);
+          
+          if (res.ok || (res.status >= 400 && res.status < 500)) {
+            console.log(`[API] ✓ Connected via proxy`);
+            return res;
+          }
+        } catch (e2) {
+          console.error(`[API] ✗ Proxy also failed: ${e2.message}`);
+        }
+      }
+      
       throw e;
     }
   }
