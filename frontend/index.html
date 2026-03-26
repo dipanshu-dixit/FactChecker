@@ -667,7 +667,8 @@
   
   // Enhanced fetch with automatic fallback and timeout
   async function apiFetch(endpoint, options = {}) {
-    const timeout = 8000;
+    // Use longer timeout for /verify endpoint (120s), shorter for others (15s)
+    const timeout = endpoint.includes('/verify?') ? 120000 : 15000;
     const url = `${API}${endpoint}`;
     
     try {
@@ -841,7 +842,13 @@
     } catch (e) {
       clearInterval(progressInterval);
       console.error('Verification error:', e);
-      result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
+      
+      // Check if it's a timeout
+      if (e.name === 'AbortError') {
+        result.innerHTML = `<div class="error-msg">⚠️ Verification is taking longer than expected (>2 minutes). The result may appear in "The Record" shortly. Please check back in a moment.</div>`;
+      } else {
+        result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
+      }
     }
 
     btn.disabled    = false;
