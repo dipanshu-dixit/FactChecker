@@ -1,3 +1,8 @@
+// Vercel serverless function - NO timeout limit
+export const config = {
+  maxDuration: 300, // 5 minutes
+};
+
 export default async function handler(req, res) {
   const RAILWAY_API = 'https://factchecker-production-3945.up.railway.app';
   
