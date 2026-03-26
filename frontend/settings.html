@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings - CrawlConda</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d0d;
+      color: #e8e8e8;
+      min-height: 100vh;
+      padding-bottom: 36px;
+    }
+    
+    header {
+      border-bottom: 1px solid #1e1e1e;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .logo { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: #7c6af7; }
+    
+    nav a {
+      color: #888;
+      text-decoration: none;
+      margin-left: 24px;
+      font-size: 0.9rem;
+    }
+    nav a:hover { color: #e8e8e8; }
+    
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 48px 24px;
+    }
+    
+    h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 32px;
+    }
+    
+    .section {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    
+    .section h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #7c6af7;
+    }
+    
+    .section p {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+    
+    .input-group {
+      margin-bottom: 16px;
+    }
+    
+    .input-group label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #ccc;
+      margin-bottom: 8px;
+    }
+    
+    .input-group input {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 12px;
+      color: #e8e8e8;
+      font-size: 0.95rem;
+      font-family: monospace;
+    }
+    
+    .input-group input:focus {
+      outline: none;
+      border-color: #7c6af7;
+    }
+    
+    .btn {
+      background: #7c6af7;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-right: 12px;
+    }
+    
+    .btn:hover {
+      background: #6a58e0;
+    }
+    
+    .btn-secondary {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+    }
+    
+    .btn-secondary:hover {
+      background: #2a2a2a;
+    }
+    
+    .btn-danger {
+      background: #ef4444;
+    }
+    
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+    
+    .status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-left: 12px;
+    }
+    
+    .status.active {
+      background: #22c55e;
+      color: #000;
+    }
+    
+    .status.inactive {
+      background: #ef4444;
+      color: #fff;
+    }
+    
+    .usage-bar {
+      width: 100%;
+      height: 8px;
+      background: #1a1a1a;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+    
+    .usage-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #7c6af7, #a89ff7);
+      transition: width 0.3s;
+    }
+    
+    .usage-text {
+      font-size: 0.85rem;
+      color: #888;
+      margin-top: 8px;
+    }
+    
+    .key-list {
+      margin-top: 16px;
+    }
+    
+    .key-item {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .key-info {
+      flex: 1;
+    }
+    
+    .key-value {
+      font-family: monospace;
+      font-size: 0.9rem;
+      color: #7c6af7;
+      margin-bottom: 4px;
+    }
+    
+    .key-meta {
+      font-size: 0.8rem;
+      color: #666;
+    }
+    
+    .success {
+      background: #0a1a0a;
+      border: 1px solid #22c55e;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #22c55e;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+    
+    .error {
+      background: #1a0a0a;
+      border: 1px solid #ef4444;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #ef4444;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    
+    .stat-card {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #7c6af7;
+      margin-bottom: 4px;
+    }
+    
+    .stat-label {
+      font-size: 0.85rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Crawl<span>Conda</span></div>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/api-docs.html">API Docs</a>
+    <a href="/settings.html" style="color: #7c6af7;">Settings</a>
+  </nav>
+</header>
+
+<div class="container">
+  <h1>Settings</h1>
+  
+  <!-- API Key Section -->
+  <div class="section">
+    <h2>API Key</h2>
+    <p>Use your API key to get higher rate limits (100 requests/day vs 5/hour).</p>
+    
+    <div id="no-key-state">
+      <p style="color: #666; margin-bottom: 16px;">You don't have an API key yet.</p>
+      <button class="btn" onclick="window.location.href='/api-docs.html'">Generate API Key</button>
+    </div>
+    
+    <div id="has-key-state" style="display: none;">
+      <div class="input-group">
+        <label>Your API Key <span class="status active" id="key-status">Active</span></label>
+        <input type="text" id="api-key-input" placeholder="cc_live_..." />
+      </div>
+      
+      <button class="btn" onclick="saveApiKey()">Save Key</button>
+      <button class="btn-secondary btn" onclick="testApiKey()">Test Key</button>
+      <button class="btn-danger btn" onclick="removeApiKey()">Remove Key</button>
+      
+      <div id="key-message"></div>
+      
+      <!-- Usage Stats -->
+      <div id="usage-stats" style="margin-top: 24px; display: none;">
+        <h3 style="font-size: 1rem; margin-bottom: 12px;">Usage Today</h3>
+        <div class="usage-bar">
+          <div class="usage-fill" id="usage-fill" style="width: 0%"></div>
+        </div>
+        <div class="usage-text">
+          <span id="usage-count">0</span> / <span id="usage-limit">100</span> requests
+          (<span id="usage-percent">0</span>%)
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- My Keys Section -->
+  <div class="section">
+    <h2>My Generated Keys</h2>
+    <p>All API keys you've generated from this browser.</p>
+    
+    <div id="my-keys-list">
+      <p style="color: #666;">No keys generated yet.</p>
+    </div>
+  </div>
+  
+  <!-- Global Stats -->
+  <div class="section">
+    <h2>Platform Statistics</h2>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="total-keys">-</div>
+        <div class="stat-label">API Keys Generated</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="total-verifications">-</div>
+        <div class="stat-label">Total Verifications</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="total-votes">-</div>
+        <div class="stat-label">Total Votes Cast</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = window.location.hostname === 'localhost' 
+    ? 'http://localhost:8000'
+    : '/api/post-proxy?path=';
+  
+  // Load saved API key on page load
+  window.addEventListener('DOMContentLoaded', () => {
+    loadSavedKey();
+    loadMyKeys();
+    loadGlobalStats();
+  });
+  
+  function loadSavedKey() {
+    const savedKey = localStorage.getItem('cc_api_key');
+    if (savedKey) {
+      document.getElementById('no-key-state').style.display = 'none';
+      document.getElementById('has-key-state').style.display = 'block';
+      document.getElementById('api-key-input').value = savedKey;
+      loadUsageStats(savedKey);
+    }
+  }
+  
+  function saveApiKey() {
+    const key = document.getElementById('api-key-input').value.trim();
+    
+    if (!key) {
+      showMessage('Please enter an API key', 'error');
+      return;
+    }
+    
+    if (!key.startsWith('cc_live_')) {
+      showMessage('Invalid API key format. Must start with cc_live_', 'error');
+      return;
+    }
+    
+    localStorage.setItem('cc_api_key', key);
+    showMessage('API key saved successfully!', 'success');
+    
+    // Add to my keys list
+    addToMyKeys(key);
+    
+    // Load usage stats
+    loadUsageStats(key);
+  }
+  
+  async function testApiKey() {
+    const key = document.getElementById('api-key-input').value.trim();
+    
+    if (!key) {
+      showMessage('Please enter an API key', 'error');
+      return;
+    }
+    
+    try {
+      const url = API_BASE.includes('post-proxy')
+        ? `${API_BASE}/api-keys/usage`
+        : `${API_BASE}/api-keys/usage`;
+      
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${key}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        showMessage(`✓ Valid key! Tier: ${data.tier}, Requests today: ${data.requests_today}/${data.daily_limit}`, 'success');
+        document.getElementById('key-status').textContent = 'Active';
+        document.getElementById('key-status').className = 'status active';
+      } else {
+        showMessage('Invalid API key', 'error');
+        document.getElementById('key-status').textContent = 'Invalid';
+        document.getElementById('key-status').className = 'status inactive';
+      }
+    } catch (e) {
+      showMessage('Failed to test key: ' + e.message, 'error');
+    }
+  }
+  
+  function removeApiKey() {
+    if (confirm('Remove API key from this browser?')) {
+      localStorage.removeItem('cc_api_key');
+      document.getElementById('api-key-input').value = '';
+      document.getElementById('no-key-state').style.display = 'block';
+      document.getElementById('has-key-state').style.display = 'none';
+      document.getElementById('usage-stats').style.display = 'none';
+      showMessage('API key removed', 'success');
+    }
+  }
+  
+  async function loadUsageStats(key) {
+    try {
+      const url = API_BASE.includes('post-proxy')
+        ? `${API_BASE}/api-keys/usage`
+        : `${API_BASE}/api-keys/usage`;
+      
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${key}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        const percent = Math.round((data.requests_today / data.daily_limit) * 100);
+        
+        document.getElementById('usage-stats').style.display = 'block';
+        document.getElementById('usage-count').textContent = data.requests_today;
+        document.getElementById('usage-limit').textContent = data.daily_limit;
+        document.getElementById('usage-percent').textContent = percent;
+        document.getElementById('usage-fill').style.width = percent + '%';
+      }
+    } catch (e) {
+      console.error('Failed to load usage:', e);
+    }
+  }
+  
+  function addToMyKeys(key) {
+    let myKeys = JSON.parse(localStorage.getItem('cc_my_keys') || '[]');
+    
+    if (!myKeys.includes(key)) {
+      myKeys.push(key);
+      localStorage.setItem('cc_my_keys', JSON.stringify(myKeys));
+      loadMyKeys();
+    }
+  }
+  
+  function loadMyKeys() {
+    const myKeys = JSON.parse(localStorage.getItem('cc_my_keys') || '[]');
+    const container = document.getElementById('my-keys-list');
+    
+    if (myKeys.length === 0) {
+      container.innerHTML = '<p style="color: #666;">No keys generated yet.</p>';
+      return;
+    }
+    
+    container.innerHTML = '<div class="key-list">' + myKeys.map(key => `
+      <div class="key-item">
+        <div class="key-info">
+          <div class="key-value">${key.slice(0, 15)}...${key.slice(-8)}</div>
+          <div class="key-meta">Generated from this browser</div>
+        </div>
+        <button class="btn-secondary btn" onclick="useKey('${key}')">Use This Key</button>
+      </div>
+    `).join('') + '</div>';
+  }
+  
+  function useKey(key) {
+    document.getElementById('no-key-state').style.display = 'none';
+    document.getElementById('has-key-state').style.display = 'block';
+    document.getElementById('api-key-input').value = key;
+    localStorage.setItem('cc_api_key', key);
+    showMessage('Key loaded! Click "Save Key" to activate.', 'success');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  
+  async function loadGlobalStats() {
+    try {
+      const statsUrl = API_BASE.includes('proxy')
+        ? `${API_BASE}/stats`
+        : `${API_BASE}/stats`;
+      
+      const res = await fetch(statsUrl);
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('total-verifications').textContent = data.total_verdicts || 0;
+        document.getElementById('total-votes').textContent = data.total_votes || 0;
+        document.getElementById('total-keys').textContent = data.total_api_keys || 0;
+      }
+    } catch (e) {
+      console.error('Failed to load stats:', e);
+      document.getElementById('total-verifications').textContent = '0';
+      document.getElementById('total-votes').textContent = '0';
+      document.getElementById('total-keys').textContent = '0';
+    }
+  }
+  
+  function showMessage(text, type) {
+    const container = document.getElementById('key-message');
+    container.className = type;
+    container.textContent = text;
+    container.style.display = 'block';
+    container.style.marginTop = '16px';
+    
+    setTimeout(() => {
+      container.style.display = 'none';
+    }, 5000);
+  }
+</script>
+
+</body>
+</html>

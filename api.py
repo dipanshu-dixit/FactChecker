@@ -565,6 +565,37 @@ def get_activity():
     return {"events": list(reversed(_activity_log))}
 
 
+@app.get("/stats")
+def get_platform_stats():
+    """Get platform-wide statistics."""
+    try:
+        # Count total verdicts
+        verdicts = verdicts_col.get(limit=10000)
+        total_verdicts = len(verdicts["ids"])
+        
+        # Count total votes
+        votes = votes_col.get(limit=10000)
+        total_votes = len(votes["ids"])
+        
+        # Count total API keys
+        api_keys = api_key_manager.keys_col.get(limit=10000)
+        total_keys = len(api_keys["ids"])
+        
+        return {
+            "total_verdicts": total_verdicts,
+            "total_votes": total_votes,
+            "total_api_keys": total_keys,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"[STATS] Failed: {e}")
+        return {
+            "total_verdicts": 0,
+            "total_votes": 0,
+            "total_api_keys": 0
+        }
+
+
 @app.get("/health")
 def health_check():
     """Health check endpoint for monitoring."""

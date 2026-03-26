@@ -530,6 +530,119 @@
       .pipeline-step { gap: 10px; }
       .verdict-table th, .verdict-table td { padding: 8px 10px; font-size: 0.8rem; }
     }
+    
+    /* Badge Modal */
+    .badge-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    .badge-modal.show { display: flex; }
+    
+    .badge-content {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    
+    .badge-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    
+    .badge-header h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+    
+    .badge-close {
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+    }
+    
+    .badge-close:hover { color: #e8e8e8; }
+    
+    .badge-preview {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    
+    .badge-preview img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+    
+    .badge-code {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    
+    .badge-code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    
+    .badge-code-header h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #ccc;
+    }
+    
+    .badge-code pre {
+      background: #000;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      color: #a89ff7;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    
+    .copy-code-btn {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      color: #888;
+      cursor: pointer;
+    }
+    
+    .copy-code-btn:hover {
+      color: #e8e8e8;
+      border-color: #7c6af7;
+    }
   </style>
 </head>
 <body>
@@ -542,6 +655,7 @@
     <a onclick="showPage('trending')">Trending</a>
     <a onclick="showPage('about')">About</a>
     <a href="/api-docs.html" target="_blank">API</a>
+    <a href="/settings.html" target="_blank">Settings</a>
   </nav>
 </header>
 
@@ -647,6 +761,44 @@
   </div>
 </div>
 
+<!-- Badge Modal -->
+<div class="badge-modal" id="badge-modal">
+  <div class="badge-content">
+    <div class="badge-header">
+      <h2>Verification Badge</h2>
+      <button class="badge-close" onclick="closeBadge()">&times;</button>
+    </div>
+    
+    <div class="badge-preview">
+      <img id="badge-img" src="" alt="Verification Badge" />
+    </div>
+    
+    <div class="badge-code">
+      <div class="badge-code-header">
+        <h3>HTML</h3>
+        <button class="copy-code-btn" onclick="copyCode('html')">Copy</button>
+      </div>
+      <pre id="badge-html"></pre>
+    </div>
+    
+    <div class="badge-code">
+      <div class="badge-code-header">
+        <h3>Markdown</h3>
+        <button class="copy-code-btn" onclick="copyCode('markdown')">Copy</button>
+      </div>
+      <pre id="badge-markdown"></pre>
+    </div>
+    
+    <div class="badge-code">
+      <div class="badge-code-header">
+        <h3>Direct Link</h3>
+        <button class="copy-code-btn" onclick="copyCode('url')">Copy</button>
+      </div>
+      <pre id="badge-url"></pre>
+    </div>
+  </div>
+</div>
+
 <div id="activity-bar">
   <span id="activity-inner">Loading activity...</span>
 </div>
@@ -749,6 +901,10 @@
     btn.disabled    = true;
     btn.textContent = "Verifying...";
     
+    // Get saved API key if exists
+    const apiKey = localStorage.getItem('cc_api_key');
+    const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {};
+    
     // Progress tracker
     let progress = [
       { step: 'Expanding query...', done: false, time: 4 },
@@ -815,12 +971,16 @@
     updateProgress();
 
     try {
-      const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`);
+      const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`, { headers });
       clearInterval(progressInterval);
       
       if (!res.ok) {
         if (res.status === 429) {
-          result.innerHTML = `<div class="error-msg">⚠️ Rate limit exceeded. Please wait a few minutes before trying again.</div>`;
+          const hasKey = localStorage.getItem('cc_api_key');
+          const msg = hasKey 
+            ? 'API key rate limit exceeded. Your daily limit has been reached.'
+            : 'Rate limit exceeded (5/hour). <a href="/settings.html" style="color: #7c6af7;">Get an API key</a> for 100 requests/day.';
+          result.innerHTML = `<div class="error-msg">⚠️ ${msg}</div>`;
         } else if (res.status === 503) {
           result.innerHTML = `<div class="error-msg">⚠️ Service temporarily unavailable. Please try again in a moment.</div>`;
         } else {
@@ -946,6 +1106,31 @@
 
     const shareHtml = hash ? `
       <div class="share-row">
+        <button class="share-btn" onclick="shareOnTwitter('${hash}', '${escHtml(claim).replace(/'/g, "\\'")}')">  
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+          Twitter
+        </button>
+        <button class="share-btn" onclick="shareOnFacebook('${hash}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+          </svg>
+          Facebook
+        </button>
+        <button class="share-btn" onclick="shareOnLinkedIn('${hash}', '${escHtml(claim).replace(/'/g, "\\'")}')">  
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+          </svg>
+          LinkedIn
+        </button>
+        <button class="share-btn" onclick="showBadge('${hash}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" 
+                  stroke="currentColor" stroke-width="1.5" fill="none"/>
+          </svg>
+          Badge
+        </button>
         <button class="share-btn" onclick="copyShare('${hash}')">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
             <path d="M8 12H16M12 8L16 12L12 16" stroke="currentColor" 
@@ -954,11 +1139,11 @@
                      16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12Z" 
                   stroke="currentColor" stroke-width="1.5"/>
           </svg>
-          Copy link
+          Copy
         </button>
         <span class="share-confirm" id="share-confirm-${hash}" 
               style="display:none;color:#22c55e;font-size:0.78rem">
-          Copied
+          Copied!
         </span>
       </div>` : "";
 
@@ -1304,6 +1489,80 @@
 
   updateActivityBar();
   setInterval(updateActivityBar, 30000);
+  
+  // Share functions
+  function shareOnTwitter(hash, claim) {
+    const url = `${window.location.origin}/#/v/${hash}`;
+    const text = `Fact-checked: "${claim}" - Verified by CrawlConda`;
+    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
+  }
+  
+  function shareOnFacebook(hash) {
+    const url = `${window.location.origin}/claim/${hash}`;
+    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank');
+  }
+  
+  function shareOnLinkedIn(hash, claim) {
+    const url = `${window.location.origin}/claim/${hash}`;
+    window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`, '_blank');
+  }
+  
+  // Badge modal functions
+  async function showBadge(hash) {
+    const modal = document.getElementById('badge-modal');
+    const img = document.getElementById('badge-img');
+    const htmlCode = document.getElementById('badge-html');
+    const markdownCode = document.getElementById('badge-markdown');
+    const urlCode = document.getElementById('badge-url');
+    
+    const badgeUrl = `${window.location.origin}/api/proxy?path=/badge/${hash}.svg`;
+    const claimUrl = `${window.location.origin}/#/v/${hash}`;
+    
+    img.src = badgeUrl;
+    urlCode.textContent = badgeUrl;
+    htmlCode.textContent = `<a href="${claimUrl}" target="_blank">\n  <img src="${badgeUrl}" alt="Verified by CrawlConda" />\n</a>`;
+    markdownCode.textContent = `[![Verified by CrawlConda](${badgeUrl})](${claimUrl})`;
+    
+    modal.classList.add('show');
+  }
+  
+  function closeBadge() {
+    document.getElementById('badge-modal').classList.remove('show');
+  }
+  
+  function copyCode(type) {
+    let text = '';
+    if (type === 'html') {
+      text = document.getElementById('badge-html').textContent;
+    } else if (type === 'markdown') {
+      text = document.getElementById('badge-markdown').textContent;
+    } else if (type === 'url') {
+      text = document.getElementById('badge-url').textContent;
+    }
+    
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard!');
+      });
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      alert('Copied to clipboard!');
+    }
+  }
+  
+  // Close modal on outside click
+  document.getElementById('badge-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'badge-modal') {
+      closeBadge();
+    }
+  });
 </script>
 </body>
 </html>
