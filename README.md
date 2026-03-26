@@ -84,9 +84,20 @@ GET  /verdict/:ipfs_hash         # fetch verdict + vote counts
 GET  /verdicts?limit=50          # list all past verdicts
 GET  /stream                     # SSE stream for real-time verdict push
 POST /recover                    # rebuild ChromaDB from Pinata if DB is lost
+
+# NEW: API Keys & Badges
+POST /api-keys/generate          # generate free API key (100 requests/day)
+GET  /api-keys/usage             # check your usage stats
+GET  /badge/:ipfs_hash.svg       # get verification badge (SVG)
+GET  /badge/:ipfs_hash/embed     # get HTML/Markdown embed codes
+GET  /claim/:ipfs_hash           # shareable page with Open Graph tags
 ```
 
 Interactive docs: `http://localhost:8000/docs`
+
+**Full API Documentation:** [API_FEATURES.md](API_FEATURES.md)
+
+**Public API Docs:** `https://fact-checker-teal.vercel.app/api-docs.html`
 
 ---
 
