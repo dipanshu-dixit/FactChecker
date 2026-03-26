@@ -828,15 +828,15 @@
         return;
       }
       
+      const data = await res.json();
+      
       // Mark all as done
       progress.forEach(p => p.done = true);
       updateProgress();
       
+      // Show completion briefly then render result
       setTimeout(() => {
-        const data = res.json();
-        data.then(d => {
-          result.innerHTML = renderVerdictCard(d, true);
-        });
+        result.innerHTML = renderVerdictCard(data, true);
       }, 500);
     } catch (e) {
       clearInterval(progressInterval);

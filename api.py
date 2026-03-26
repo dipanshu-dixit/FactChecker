@@ -112,6 +112,14 @@ async def post_to_discord_webhook(payload: dict):
     """Send verdict to Discord #verified channel via webhook."""
     if not DISCORD_VERIFIED_WEBHOOK:
         return
+    
+    # Validate required fields
+    ipfs_url = payload.get("ipfs_url", "").strip()
+    web_url = payload.get("web_url", "").strip()
+    if not ipfs_url or not web_url:
+        print(f"[WEBHOOK] Skipped - missing URLs (ipfs={bool(ipfs_url)}, web={bool(web_url)})")
+        return
+    
     verdict = payload.get("verdict", "UNCONFIRMED")
     colors = {
         "CONFIRMED":           0x22c55e,
@@ -125,9 +133,12 @@ async def post_to_discord_webhook(payload: dict):
     
     sources = payload.get("sources", [])
     source_lines = "\n".join(
-        f"{i+1}. [{s['title'][:80]}]({s['url']})"
+        f"{i+1}. [{s['title'][:60]}]({s['url']})"
         for i, s in enumerate(sources[:3])
+        if s.get('title') and s.get('url')
     ) or "No sources matched."
+    # Discord field limit is 1024 chars
+    source_lines = source_lines[:1020]
     
     summary = payload.get("summary","").strip()
     # strip VERDICT: header line if present
@@ -136,39 +147,44 @@ async def post_to_discord_webhook(payload: dict):
         if "VERDICT:" not in l.upper()
     ).strip()[:500]
     
-    # BUG 4 FIX: Format timestamp for Discord, omit if invalid
-    raw_ts = (payload.get("timestamp") or "").replace("+00:00", "Z")
+    claim = payload.get("claim", "").strip()[:300]
+    if not claim:
+        claim = "No claim provided"
     
     embed = {
         "title": f"{emoji}  {verdict}",
-        "description": summary,
+        "description": summary or "No summary available",
         "color": color,
         "fields": [
-            {"name": "Claim", 
-             "value": payload.get("claim","")[:300], 
-             "inline": False},
-            {"name": "Sources", 
-             "value": source_lines, 
-             "inline": False},
-            {"name": "Archived", 
-             "value": f"[View permanent record →]({payload.get('ipfs_url','')})", 
-             "inline": False},
-            {"name": "Signal this", 
-             "value": f"[Open on web]({payload.get('web_url','')})",
-             "inline": False},
+            {"name": "Claim", "value": claim, "inline": False},
+            {"name": "Sources", "value": source_lines, "inline": False},
+            {"name": "Archived", "value": f"[View record]({ipfs_url})", "inline": False},
+            {"name": "Vote", "value": f"[Open on web]({web_url})", "inline": False},
         ],
         "footer": {"text": "CrawlConda · Ground Truth Engine"},
     }
+    
+    # Add timestamp only if valid ISO8601
+    raw_ts = payload.get("timestamp", "")
     if raw_ts:
-        embed["timestamp"] = raw_ts
+        try:
+            # Validate and normalize timestamp
+            dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            embed["timestamp"] = dt.isoformat().replace("+00:00", "Z")
+        except (ValueError, AttributeError):
+            pass  # Skip invalid timestamp
+    
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 DISCORD_VERIFIED_WEBHOOK,
                 json={"embeds": [embed]},
-                timeout=TIMEOUT_WEBHOOK  # CLEANED: use constant
+                timeout=TIMEOUT_WEBHOOK
             )
-            print(f"[WEBHOOK] {verdict} → {resp.status_code}")  # CLEANED: single log line
+            if resp.status_code == 400:
+                print(f"[WEBHOOK] 400 Bad Request - Response: {resp.text[:200]}")
+            else:
+                print(f"[WEBHOOK] {verdict} → {resp.status_code}")
     except Exception as e:
         print(f"[WEBHOOK] Failed: {e}")
 
@@ -341,6 +357,10 @@ async def verify(claim: str, request: Request):
     _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
     # set web_url BEFORE broadcast so SSE clients receive it
     payload["web_url"] = f"{WEB_URL}/#/v/{ipfs_hash}"  # CLEANED: use module-level constant
+    # Add vote counts
+    votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
+    payload["human_upvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
+    payload["human_downvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
     await broadcast({"type": "new_verdict", "data": payload})
     asyncio.create_task(post_to_discord_webhook(payload))
     return payload
