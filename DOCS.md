@@ -2,7 +2,7 @@
 
 ## What Is CrawlConda
 
-CrawlConda is a fact-checking system. You give it a claim in plain English. It searches 24 live news RSS feeds, runs the text through a 4-node AI pipeline, and returns a source-grounded verdict — CONFIRMED, PARTIALLY CONFIRMED, UNCONFIRMED, or FALSE.
+CrawlConda is a fact-checking system. You give it a claim in plain English. It searches 34 live news RSS feeds, runs the text through a 4-node AI pipeline, and returns a source-grounded verdict — CONFIRMED, PARTIALLY CONFIRMED, UNCONFIRMED, or FALSE.
 
 Every verdict is stored permanently on IPFS. Humans can confirm or challenge any verdict via Discord reactions, the web UI, or the REST API. The AI verdict and human votes are stored together, queryable forever. All verdicts sync in real time across Discord and all open browser tabs via Server-Sent Events (SSE).
 
@@ -112,7 +112,7 @@ User claim
     e.g. "is khamenei dead" → "Khamenei dead Ayatollah death Iran Supreme Leader"
     ↓
 [2] Searcher (no LLM)
-    Scans all 24 RSS feeds + Google News
+    Scans all 34 RSS feeds + Google News
     Scores each article by keyword match count
     Returns top 8 articles with full content
     ↓
@@ -170,7 +170,7 @@ Examples:
 The bot sends a live status message that updates through 5 stages:
 ```
 🔍  Expanding query...
-📡  Scanning 24 sources...
+📡  Scanning 34 sources...
 🧠  Extracting facts...
 ⚖️  Issuing verdict...
 [Status message deleted, rich embed posted]
@@ -201,7 +201,7 @@ Open `http://localhost:3000` (or the Codespaces forwarded URL).
 
 **Branding:**
 - Title: "Ground Truth Engine"
-- Tagline: "Submit any claim. CrawlConda searches 24 live sources, runs a 4-node AI pipeline, and returns a source-grounded verdict — pinned permanently to IPFS."
+- Tagline: "Submit any claim. CrawlConda searches 34 live sources, runs a 4-node AI pipeline, and returns a source-grounded verdict — pinned permanently to IPFS."
 
 ---
 
@@ -360,7 +360,7 @@ Browse all your pins at: https://app.pinata.cloud/pinmanager
 
 ## News Sources
 
-24 feeds scanned on every request. All results scored by keyword relevance, top 8 passed to the LLM.
+34 feeds scanned on every request. All results scored by keyword relevance, top 8 passed to the LLM.
 
 | Category | Sources |
 |---|---|
@@ -370,7 +370,7 @@ Browse all your pins at: https://app.pinata.cloud/pinmanager
 | Science | BBC Science, Science Daily, Guardian Science |
 | US News | Guardian US |
 | Sport | BBC Sport, ESPN |
-| Fallback | DuckDuckGo Lite (only if all 24 feeds return zero matches) |
+| Fallback | DuckDuckGo Lite (only if all 34 feeds return zero matches) |
 
 Date window: last 30 days. Google News RSS is query-specific and typically returns 60–100 entries per search.
 

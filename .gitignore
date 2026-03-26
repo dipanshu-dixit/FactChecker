@@ -1,9 +1,36 @@
-.env
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
 *.egg-info/
-.venv/
+dist/
+build/
+
+# Environment
+.env
+.env.local
 venv/
+env/
+
+# ChromaDB
 crawlconda_data/
-.chroma/
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
 *.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (if any)
+node_modules/

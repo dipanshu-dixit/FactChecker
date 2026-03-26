@@ -1,6 +1,6 @@
 # CrawlConda — Ground Truth Engine
 
-A multi-agent fact-checking system. Submit any claim — it searches 24 live RSS feeds, runs a 4-node AI pipeline, and returns a source-grounded verdict pinned permanently to IPFS. Humans can confirm or challenge every claim via Discord reactions, the web UI, or the REST API. All verdicts sync in real time across every open browser tab and Discord simultaneously via SSE.
+A multi-agent fact-checking system. Submit any claim — it searches 34 live RSS feeds, runs a 4-node AI pipeline, and returns a source-grounded verdict pinned permanently to IPFS. Humans can confirm or challenge every claim via Discord reactions, the web UI, or the REST API. All verdicts sync in real time across every open browser tab and Discord simultaneously via SSE.
 
 <img width="1915" height="840" alt="Image" src="https://github.com/user-attachments/assets/c0096d7b-bc9a-45f0-853f-12558d982aae" />
 
@@ -115,4 +115,4 @@ Join the Discord server: [discord.gg/4hX4f7cu](https://discord.gg/ve3G7vfHNm)
 
 ## Full Documentation
 
-See [DOCS.md](DOCS.md) for complete architecture, pipeline details, all 24 sources, API reference, known limitations, test guide, and deployment instructions.
+See [DOCS.md](DOCS.md) for complete architecture, pipeline details, all 34 sources, API reference, known limitations, test guide, and deployment instructions.
