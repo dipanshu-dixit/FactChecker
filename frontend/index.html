@@ -750,13 +750,84 @@
   </div>
 
   <div class="about-section">
+    <h2>Discord Bot</h2>
+    <p>Run fact-checks directly from Discord. All results sync to the web in real time.</p>
+    
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="step-num">1</div>
+        <div class="step-text"><strong>Join the server</strong> — Click the Discord button below</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">2</div>
+        <div class="step-text"><strong>Type the command</strong> — You MUST type <code style="background:#7c6af7;color:#fff;padding:2px 6px;border-radius:4px;">!verify</code> followed by your claim</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">3</div>
+        <div class="step-text"><strong>Wait ~40 seconds</strong> — Bot will post verdict with sources</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">4</div>
+        <div class="step-text"><strong>Vote with reactions</strong> — React 👍 or 👎 to cast your vote</div>
+      </div>
+    </div>
+    
+    <div style="background:#1a0a0a;border:1px solid #f97316;border-radius:8px;padding:16px;margin:16px 0;">
+      <strong style="color:#f97316;">⚠️ Important:</strong>
+      <ul style="margin:8px 0 0 20px;color:#ccc;line-height:1.8;">
+        <li>You MUST start with <code style="background:#000;padding:2px 6px;border-radius:4px;">!verify</code> command</li>
+        <li>Example: <code style="background:#000;padding:2px 6px;border-radius:4px;">!verify Iran struck Qatar</code></li>
+        <li>Don't just type the claim without <code style="background:#000;padding:2px 6px;border-radius:4px;">!verify</code></li>
+        <li>Wait for the bot to respond (takes ~40 seconds)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="about-section">
+    <h2>API Keys</h2>
+    <p>Get higher rate limits with a free API key (100 requests/day vs 5/hour).</p>
+    
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="step-num">1</div>
+        <div class="step-text"><strong>Generate key</strong> — Go to <a href="/api-docs.html" style="color:#7c6af7;">API Docs</a> and fill the form</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">2</div>
+        <div class="step-text"><strong>Copy the key</strong> — Save it somewhere (shown only once!)</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">3</div>
+        <div class="step-text"><strong>Save in Settings</strong> — Go to <a href="/settings.html" style="color:#7c6af7;">Settings</a>, paste key, click Save</div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-num">4</div>
+        <div class="step-text"><strong>That's it!</strong> — Key is auto-loaded and used on all future requests</div>
+      </div>
+    </div>
+    
+    <div style="background:#0a1a0a;border:1px solid #22c55e;border-radius:8px;padding:16px;margin:16px 0;">
+      <strong style="color:#22c55e;">✅ No manual work needed:</strong>
+      <ul style="margin:8px 0 0 20px;color:#ccc;line-height:1.8;">
+        <li>Key is saved in your browser (localStorage)</li>
+        <li>Automatically attached to every verification request</li>
+        <li>No need to paste it anywhere else</li>
+        <li>View usage stats anytime in Settings</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="about-section">
     <h2>Open Source & Self-Hostable</h2>
     <p>The full pipeline is open source. Add your own API keys and run a private instance — air-gapped if needed.</p>
     <p><a href="https://github.com/dipanshu-dixit/FactChecker" style="color:#7c6af7">github.com/dipanshu-dixit/FactChecker</a></p>
   </div>
 
   <div class="discord-banner">
-    <p>Run <strong>!verify</strong> in the Discord server. Results sync to this page in real time.</p>
+    <div>
+      <p style="margin-bottom:8px;"><strong>Try the Discord Bot</strong></p>
+      <p style="font-size:0.85rem;color:#888;">Type <code style="background:#000;padding:2px 6px;border-radius:4px;">!verify [your claim]</code> in the server</p>
+    </div>
     <a href="https://discord.gg/jvzaKkvJM2" class="discord-btn" target="_blank" rel="noopener">Join Discord</a>
   </div>
 </div>
