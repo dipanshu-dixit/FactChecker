@@ -7,6 +7,36 @@ import time
 
 BASE_URL = "http://localhost:8000"
 
+def test_rate_limit_without_key():
+    """Test IP-based rate limit (5 requests/hour)."""
+    print("\n🔒 Testing Rate Limit WITHOUT API Key...")
+    print("   Limit: 5 requests per hour per IP")
+    
+    for i in range(6):
+        try:
+            response = requests.get(
+                f"{BASE_URL}/verify",
+                params={"claim": f"Test claim {i+1}"},
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                print(f"   ✅ Request {i+1}/6: Success")
+            elif response.status_code == 429:
+                print(f"   ❌ Request {i+1}/6: Rate limited!")
+                print(f"      Message: {response.json().get('detail')}")
+                print(f"\n   💡 You hit the limit after {i} requests")
+                print(f"      Get an API key for 100 requests/day!")
+                break
+            else:
+                print(f"   ⚠️  Request {i+1}/6: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"   ❌ Request {i+1}/6: {e}")
+        
+        if i < 5:
+            time.sleep(2)
+
+
 def test_api_key_generation():
     """Test API key generation."""
     print("\n🔑 Testing API Key Generation...")
@@ -34,7 +64,7 @@ def test_verify_with_key(api_key):
     """Test verification with API key."""
     print("\n🔍 Testing Verification with API Key...")
     
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    headers = {"Authorization": f"Bearer {api_key}"}
     
     response = requests.get(
         f"{BASE_URL}/verify",
@@ -118,43 +148,95 @@ def test_claim_page(ipfs_hash):
         print(f"❌ Failed: {response.status_code}")
 
 
+def test_rate_limit_with_key(api_key):
+    """Test API key rate limit (100 requests/day)."""
+    print("\n🔐 Testing Rate Limit WITH API Key...")
+    print("   Limit: 100 requests per day (free tier)")
+    
+    try:
+        for i in range(3):
+            response = requests.get(
+                f"{BASE_URL}/verify",
+                params={"claim": f"Test with key {i+1}"},
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                print(f"   ✅ Request {i+1}/3: Success (using API key)")
+            elif response.status_code == 429:
+                print(f"   ❌ Request {i+1}/3: Rate limited (100/day exceeded)")
+                break
+            
+            time.sleep(2)
+        
+        usage_res = requests.get(
+            f"{BASE_URL}/api-keys/usage",
+            headers={"Authorization": f"Bearer {api_key}"}
+        )
+        
+        if usage_res.ok:
+            data = usage_res.json()
+            print(f"\n   📊 Current usage: {data['requests_today']}/{data['daily_limit']}")
+            remaining = data['daily_limit'] - data['requests_today']
+            print(f"   🔥 Remaining today: {remaining} requests")
+    except Exception as e:
+        print(f"   ❌ Failed: {e}")
+
+
 def main():
     print("=" * 60)
     print("CrawlConda API Features Test Suite")
     print("=" * 60)
     
-    # Test 1: Generate API key
+    # Test 1: Rate limit without key
+    test_rate_limit_without_key()
+    
+    print("\n" + "=" * 60)
+    input("\nPress Enter to continue with API key tests...")
+    print("=" * 60)
+    
+    # Test 2: Generate API key
     api_key = test_api_key_generation()
     if not api_key:
         print("\n❌ Cannot continue without API key")
         return
     
-    # Test 2: Verify with API key
+    # Test 3: Verify with API key
     ipfs_hash = test_verify_with_key(api_key)
     if not ipfs_hash:
         print("\n⚠️ Using existing hash for remaining tests")
-        # Use a known hash for testing
         ipfs_hash = "QmSZ4qT8CmtWj3T5krB6WFKfiA6zbtPUQqvwVQAtn19wNx"
     
-    # Test 3: Check usage
+    # Test 4: Check usage
     test_api_key_usage(api_key)
     
-    # Test 4: Badge SVG
+    # Test 5: Badge SVG
     test_badge_svg(ipfs_hash)
     
-    # Test 5: Badge embed
+    # Test 6: Badge embed
     test_badge_embed(ipfs_hash)
     
-    # Test 6: Claim page
+    # Test 7: Claim page
     test_claim_page(ipfs_hash)
+    
+    # Test 8: Rate limit with key
+    test_rate_limit_with_key(api_key)
     
     print("\n" + "=" * 60)
     print("✅ All tests completed!")
     print("=" * 60)
-    print(f"\nYour API Key: {api_key}")
-    print(f"Badge URL: {BASE_URL}/badge/{ipfs_hash}.svg")
-    print(f"Claim Page: {BASE_URL}/claim/{ipfs_hash}")
-    print(f"\nAPI Docs: http://localhost:3000/api-docs.html")
+    print(f"\n📋 Summary:")
+    print(f"   API Key: {api_key}")
+    print(f"   Badge URL: {BASE_URL}/badge/{ipfs_hash}.svg")
+    print(f"   Claim Page: {BASE_URL}/claim/{ipfs_hash}")
+    print(f"\n🌐 Web Pages:")
+    print(f"   Settings: http://localhost:3000/settings.html")
+    print(f"   API Docs: http://localhost:3000/api-docs.html")
+    print(f"\n📊 Rate Limits:")
+    print(f"   Without API key: 5 requests/hour per IP")
+    print(f"   With API key (free): 100 requests/day")
+    print(f"   With API key (pro): 1,000 requests/day")
 
 
 if __name__ == "__main__":
