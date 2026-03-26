@@ -883,19 +883,13 @@
     ? 'http://localhost:8000'
     : '/api/proxy?path=';
   
-  // Enhanced fetch with timeout
+  // Enhanced fetch without client-side timeout (Vercel proxy handles it)
   async function apiFetch(endpoint, options = {}) {
-    // Use 120s timeout for /verify, 15s for others
-    const timeout = endpoint.includes('/verify?') ? 120000 : 15000;
     const url = `${API}${endpoint}`;
     
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-      
       console.log(`[API] Trying: ${url}`);
-      const res = await fetch(url, { ...options, signal: controller.signal });
-      clearTimeout(timeoutId);
+      const res = await fetch(url, options);
       
       if (res.ok || (res.status >= 400 && res.status < 500)) {
         console.log(`[API] ✓ Connected`);
@@ -1073,13 +1067,7 @@
     } catch (e) {
       clearInterval(progressInterval);
       console.error('Verification error:', e);
-      
-      // Check if it's a timeout
-      if (e.name === 'AbortError') {
-        result.innerHTML = `<div class="error-msg">⚠️ Verification is taking longer than expected (>2 minutes). The result may appear in "The Record" shortly. Please check back in a moment.</div>`;
-      } else {
-        result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment.</div>`;
-      }
+      result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment. Check "The Record" page in case the result was saved.</div>`;
     }
 
     btn.disabled    = false;
