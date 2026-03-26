@@ -236,7 +236,8 @@
     <p>The CrawlConda API allows you to verify claims programmatically, retrieve past verdicts, and embed verification badges on your website.</p>
     
     <h3>Base URL</h3>
-    <pre><code>https://factchecker-production-3945.up.railway.app</code></pre>
+    <pre><code>https://fact-checker-teal.vercel.app/api/proxy?path=</code></pre>
+    <p style="color: #888; font-size: 0.9rem; margin-top: 8px;">Or direct (if your network allows): <code>https://factchecker-production-3945.up.railway.app</code></p>
     
     <h3>Rate Limits</h3>
     <table>
@@ -317,7 +318,7 @@
       <pre><code>Authorization: Bearer YOUR_API_KEY</code></pre>
       
       <h3>Example Request</h3>
-      <pre><code>curl "https://factchecker-production-3945.up.railway.app/verify?claim=Iran%20struck%20Qatar%20gas%20facilities" \
+      <pre><code>curl "https://fact-checker-teal.vercel.app/api/proxy?path=/verify?claim=Iran%20struck%20Qatar" \
   -H "Authorization: Bearer cc_live_..."</code></pre>
       
       <h3>Example Response</h3>
@@ -349,7 +350,7 @@
       <p class="description">Retrieve a specific verdict by its IPFS hash.</p>
       
       <h3>Example Request</h3>
-      <pre><code>curl "https://factchecker-production-3945.up.railway.app/verdict/QmXxx..."</code></pre>
+      <pre><code>curl "https://fact-checker-teal.vercel.app/api/proxy?path=/verdict/QmXxx..."</code></pre>
     </div>
     
     <!-- List Verdicts -->
@@ -412,7 +413,7 @@
       <p class="description">Get a "Verified by CrawlConda" SVG badge for embedding.</p>
       
       <h3>Example</h3>
-      <pre><code>&lt;img src="https://factchecker-production-3945.up.railway.app/badge/QmXxx.svg" alt="Verified" /&gt;</code></pre>
+      <pre><code>&lt;img src="https://fact-checker-teal.vercel.app/api/proxy?path=/badge/QmXxx.svg" alt="Verified" /&gt;</code></pre>
     </div>
     
     <!-- Badge Embed -->
@@ -503,7 +504,9 @@
 </div>
 
 <script>
-  const API_BASE = 'https://factchecker-production-3945.up.railway.app';
+  const API_BASE = window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1')
+    ? 'http://localhost:8000'
+    : '/api/post-proxy?path=';
   
   async function generateKey() {
     const name = document.getElementById('key-name').value.trim();
@@ -521,7 +524,11 @@
     }
     
     try {
-      const res = await fetch(`${API_BASE}/api-keys/generate`, {
+      const url = API_BASE.includes('post-proxy') 
+        ? `${API_BASE}/api-keys/generate`
+        : `${API_BASE}/api-keys/generate`;
+      
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, use_case: useCase })
