@@ -1050,6 +1050,14 @@
     }, 1000);
     
     updateProgress();
+    
+    // Show immediate feedback (perceived speed)
+    result.innerHTML = `
+      <div class="status">
+        <div class="spinner"></div>
+        Analyzing claim across 34 global news sources...
+      </div>
+    `;
 
     try {
       console.time('verify');
@@ -1136,17 +1144,21 @@
       
       // 🔥 FIX 3: Try fallback fetch (verdict may exist even if render failed)
       try {
-        const fallback = await apiFetch(`/verdicts?limit=1`);
+        // Search by normalized claim, not just latest
+        const claimKey = claim.toLowerCase().trim().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ');
+        const fallback = await apiFetch(`/verdicts?limit=50`);
         const fallbackData = await fallback.json();
         
-        // Check if the most recent verdict matches our claim
+        // Find matching verdict by claim similarity
         if (fallbackData?.verdicts?.length > 0) {
-          const latest = fallbackData.verdicts[fallbackData.verdicts.length - 1];
-          const claimMatch = latest.claim?.toLowerCase().trim() === claim.toLowerCase().trim();
+          const match = fallbackData.verdicts.find(v => {
+            const vClaim = (v.claim || '').toLowerCase().trim().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ');
+            return vClaim === claimKey;
+          });
           
-          if (claimMatch && latest.verdict && _activeVerifyRequest === requestId) {
-            console.log('[FALLBACK] Found verdict in DB, rendering...');
-            result.innerHTML = renderVerdictCard(latest, true, claim);
+          if (match && match.verdict && _activeVerifyRequest === requestId) {
+            console.log('[FALLBACK] Found verdict in DB by claim match');
+            result.innerHTML = renderVerdictCard(match, true, claim);
             return;
           }
         }
@@ -1658,8 +1670,10 @@
       const data = await res.json();
       const events = data.events || [];
       const text = events.map(e => {
-        if (e.type === "verify") 
-          return `${e.verdict} — "${e.claim}"`;
+        if (e.type === "verify") {
+          const claim = (e.claim || "").slice(0, 60);
+          return `${e.verdict} — "${claim}${claim.length >= 60 ? '...' : ''}"`;
+        }
         if (e.type === "vote")   
           return `${e.vote === "up" ? "↑" : "↓"} vote on record`;
         return "";
