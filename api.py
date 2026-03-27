@@ -904,6 +904,7 @@ async def get_badge_embed(ipfs_hash: str):
 async def get_claim_page(ipfs_hash: str):
     """Serve HTML page with Open Graph meta tags for social sharing."""
     from fastapi.responses import HTMLResponse
+    import html as html_escape
     
     # Fetch verdict
     results = verdicts_col.get(ids=[ipfs_hash])
@@ -916,76 +917,182 @@ async def get_claim_page(ipfs_hash: str):
     published = data.get("published", "")
     verdict_line = next((l for l in published.splitlines() if "VERDICT" in l.upper()), "")
     verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
-    claim = data.get("claim") or data.get("content", "Unknown claim")
-    summary = published.replace(verdict_line, "").strip()[:200]
+    claim_raw = data.get("claim") or data.get("content", "Unknown claim")
+    summary_raw = published.replace(verdict_line, "").strip()[:200]
+    
+    # Escape for HTML
+    claim = html_escape.escape(claim_raw)
+    summary = html_escape.escape(summary_raw)
+    verdict_escaped = html_escape.escape(verdict_key)
     
     # Get vote counts
     votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
     up = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
     down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
     
-    # Generate HTML with OG tags
-    html = f'''<!DOCTYPE html>
+    # Verdict emoji for visual appeal
+    emoji_map = {
+        "CONFIRMED": "✅",
+        "PARTIALLY CONFIRMED": "🟡",
+        "UNCONFIRMED": "⚠️",
+        "FALSE": "❌"
+    }
+    emoji = emoji_map.get(verdict_key, "🔍")
+    
+    # Color scheme
+    color_map = {
+        "CONFIRMED": "#22c55e",
+        "PARTIALLY CONFIRMED": "#eab308",
+        "UNCONFIRMED": "#f97316",
+        "FALSE": "#ef4444"
+    }
+    color = color_map.get(verdict_key, "#888888")
+    
+    # OG Image: Use a data URI with inline SVG for better compatibility
+    og_image_url = f"{WEB_URL}/og-image/{ipfs_hash}.png"
+    
+    # Generate HTML with proper OG tags
+    html_content = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- Primary Meta Tags -->
-  <title>{verdict_key}: {claim[:60]}</title>
-  <meta name="title" content="{verdict_key}: {claim[:60]}">
+  <title>{emoji} {verdict_escaped}: {claim[:60]}</title>
+  <meta name="title" content="{emoji} {verdict_escaped}: {claim[:60]}">
   <meta name="description" content="{summary}">
+  <meta name="author" content="CrawlConda">
   
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="article">
   <meta property="og:url" content="{WEB_URL}/claim/{ipfs_hash}">
-  <meta property="og:title" content="{verdict_key}: {claim[:60]}">
-  <meta property="og:description" content="{summary}">
-  <meta property="og:image" content="{WEB_URL}/badge/{ipfs_hash}.svg">
-  <meta property="og:site_name" content="CrawlConda">
+  <meta property="og:title" content="{emoji} {verdict_escaped}">
+  <meta property="og:description" content="{claim[:150]}">
+  <meta property="og:image" content="{og_image_url}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="CrawlConda · Ground Truth Engine">
   
   <!-- Twitter -->
-  <meta property="twitter:card" content="summary_large_image">
-  <meta property="twitter:url" content="{WEB_URL}/claim/{ipfs_hash}">
-  <meta property="twitter:title" content="{verdict_key}: {claim[:60]}">
-  <meta property="twitter:description" content="{summary}">
-  <meta property="twitter:image" content="{WEB_URL}/badge/{ipfs_hash}.svg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="{WEB_URL}/claim/{ipfs_hash}">
+  <meta name="twitter:title" content="{emoji} {verdict_escaped}">
+  <meta name="twitter:description" content="{claim[:150]}">
+  <meta name="twitter:image" content="{og_image_url}">
+  <meta name="twitter:site" content="@CrawlConda">
   
-  <!-- Redirect to main app -->
-  <meta http-equiv="refresh" content="0; url={WEB_URL}/#/v/{ipfs_hash}">
+  <!-- LinkedIn -->
+  <meta property="og:image:alt" content="CrawlConda Verification: {verdict_escaped}">
+  
+  <!-- Redirect to main app after 1 second -->
+  <meta http-equiv="refresh" content="1; url={WEB_URL}/#/v/{ipfs_hash}">
   
   <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0d0d0d;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 100%);
       color: #e8e8e8;
-      padding: 40px 20px;
-      text-align: center;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
     }}
     .container {{
       max-width: 600px;
-      margin: 0 auto;
+      background: #141414;
+      border: 2px solid {color};
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     }}
-    h1 {{ color: #7c6af7; }}
-    .votes {{ color: #888; margin-top: 20px; }}
-    a {{ color: #7c6af7; text-decoration: none; }}
+    .emoji {{
+      font-size: 4rem;
+      margin-bottom: 20px;
+      display: block;
+    }}
+    .verdict {{
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: {color};
+      margin-bottom: 20px;
+      letter-spacing: 1px;
+    }}
+    .claim {{
+      font-size: 1.1rem;
+      line-height: 1.6;
+      color: #ccc;
+      margin-bottom: 24px;
+      padding: 20px;
+      background: #0a0a0a;
+      border-radius: 8px;
+      border-left: 4px solid {color};
+    }}
+    .summary {{
+      font-size: 0.95rem;
+      color: #888;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }}
+    .votes {{
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 24px;
+    }}
+    .votes span {{
+      margin: 0 8px;
+      font-weight: 600;
+    }}
+    .votes .up {{ color: #22c55e; }}
+    .votes .down {{ color: #ef4444; }}
+    .cta {{
+      display: inline-block;
+      background: {color};
+      color: #fff;
+      padding: 14px 32px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }}
+    .cta:hover {{
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(124, 106, 247, 0.3);
+    }}
+    .footer {{
+      margin-top: 32px;
+      font-size: 0.8rem;
+      color: #444;
+    }}
+    .loader {{
+      margin-top: 20px;
+      font-size: 0.85rem;
+      color: #666;
+    }}
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>CrawlConda Verified</h1>
-    <p><strong>{verdict_key}</strong></p>
-    <p>{claim}</p>
-    <p>{summary}</p>
-    <div class="votes">↑ {up} · ↓ {down}</div>
-    <p style="margin-top: 40px;">
-      <a href="{WEB_URL}/#/v/{ipfs_hash}">View full verification →</a>
-    </p>
+    <span class="emoji">{emoji}</span>
+    <div class="verdict">{verdict_escaped}</div>
+    <div class="claim">{claim}</div>
+    <div class="summary">{summary}</div>
+    <div class="votes">
+      <span class="up">↑ {up}</span>
+      <span class="down">↓ {down}</span>
+    </div>
+    <a href="{WEB_URL}/#/v/{ipfs_hash}" class="cta">View Full Verification</a>
+    <div class="footer">CrawlConda · Ground Truth Engine</div>
+    <div class="loader">Redirecting...</div>
   </div>
 </body>
 </html>'''
     
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/health")
@@ -1046,4 +1153,88 @@ async def recover_from_pinata():
             except Exception:
                 skipped += 1
 
-    return {"recovered": recovered, "skipped": skipped, "total_pins": len(pins)}
+    return {"recovered": recovered, "skipped": skipped, "total_pins": len(pins)}# Add this to api.py after the get_badge_svg endpoint
+
+@app.get("/og-image/{ipfs_hash}.png")
+async def get_og_image(ipfs_hash: str):
+    """Generate Open Graph image (1200x630) for social media sharing."""
+    from fastapi.responses import Response
+    import html as html_escape
+    
+    # Fetch verdict
+    results = verdicts_col.get(ids=[ipfs_hash])
+    if not results["ids"]:
+        raise HTTPException(status_code=404, detail="Verdict not found")
+    
+    data = json.loads(results["documents"][0])
+    
+    # Extract data
+    published = data.get("published", "")
+    verdict_line = next((l for l in published.splitlines() if "VERDICT" in l.upper()), "")
+    verdict_key = next((k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED")
+    claim_raw = data.get("claim") or data.get("content", "Unknown claim")
+    
+    # Truncate claim for image
+    claim = claim_raw[:120] + ("..." if len(claim_raw) > 120 else "")
+    claim_escaped = html_escape.escape(claim)
+    verdict_escaped = html_escape.escape(verdict_key)
+    
+    # Color scheme
+    color_map = {
+        "CONFIRMED": "#22c55e",
+        "PARTIALLY CONFIRMED": "#eab308",
+        "UNCONFIRMED": "#f97316",
+        "FALSE": "#ef4444"
+    }
+    color = color_map.get(verdict_key, "#888888")
+    
+    # Generate SVG (social platforms will render as PNG)
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d0d0d;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a1a1a;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  
+  <!-- Border -->
+  <rect x="40" y="40" width="1120" height="550" rx="16" fill="none" stroke="{color}" stroke-width="4"/>
+  
+  <!-- Logo -->
+  <text x="100" y="120" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" 
+        font-size="32" font-weight="700" fill="#7c6af7">CrawlConda</text>
+  <text x="100" y="155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" 
+        font-size="18" font-weight="400" fill="#666">Ground Truth Engine</text>
+  
+  <!-- Verdict Badge -->
+  <rect x="100" y="200" width="300" height="60" rx="30" fill="{color}"/>
+  <text x="250" y="240" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" 
+        font-size="28" font-weight="800" fill="#ffffff" text-anchor="middle">{verdict_escaped}</text>
+  
+  <!-- Claim Text (wrapped) -->
+  <foreignObject x="100" y="290" width="1000" height="200">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif;
+      font-size: 32px;
+      line-height: 1.4;
+      color: #e8e8e8;
+      font-weight: 500;
+    ">{claim_escaped}</div>
+  </foreignObject>
+  
+  <!-- Footer -->
+  <text x="100" y="550" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" 
+        font-size="16" fill="#666">Verified by CrawlConda · Source-grounded fact-checking</text>
+</svg>'''
+    
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=86400",  # Cache for 24 hours
+            "Content-Disposition": f'inline; filename="og-{ipfs_hash[:8]}.svg"'
+        }
+    )

@@ -2,67 +2,65 @@
 from urllib.parse import quote
 
 def generate_badge_svg(verdict: str, claim: str) -> str:
-    """Generate SVG badge for a verified claim.
+    """Generate professional SVG badge for verified claims.
     
     Args:
         verdict: CONFIRMED, PARTIALLY CONFIRMED, UNCONFIRMED, or FALSE
-        claim: The claim text (truncated to 60 chars)
+        claim: The claim text
     
     Returns:
-        SVG markup as string
+        Clean, professional SVG badge
     """
+    # Professional color scheme
     colors = {
-        "CONFIRMED": "#22c55e",
-        "PARTIALLY CONFIRMED": "#eab308",
-        "UNCONFIRMED": "#f97316",
-        "FALSE": "#ef4444",
+        "CONFIRMED": {"bg": "#22c55e", "text": "#ffffff"},
+        "PARTIALLY CONFIRMED": {"bg": "#eab308", "text": "#000000"},
+        "UNCONFIRMED": {"bg": "#f97316", "text": "#ffffff"},
+        "FALSE": {"bg": "#ef4444", "text": "#ffffff"},
     }
     
-    emojis = {
-        "CONFIRMED": "✅",
-        "PARTIALLY CONFIRMED": "🟡",
-        "UNCONFIRMED": "⚠️",
-        "FALSE": "❌",
+    # Clean labels without emojis
+    labels = {
+        "CONFIRMED": "VERIFIED",
+        "PARTIALLY CONFIRMED": "PARTIAL",
+        "UNCONFIRMED": "UNCONFIRMED",
+        "FALSE": "FALSE",
     }
     
-    color = colors.get(verdict, "#888888")
-    emoji = emojis.get(verdict, "🔍")
-    claim_short = claim[:60] + ("..." if len(claim) > 60 else "")
+    color_scheme = colors.get(verdict, {"bg": "#888888", "text": "#ffffff"})
+    label = labels.get(verdict, "VERIFIED")
     
-    # Escape XML special chars
+    # Truncate claim intelligently
+    max_chars = 50
+    if len(claim) > max_chars:
+        claim_short = claim[:max_chars].rsplit(' ', 1)[0] + "..."
+    else:
+        claim_short = claim
+    
+    # Escape XML
     claim_escaped = (claim_short
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;"))
     
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="400" height="80" role="img" aria-label="CrawlConda Verified">
-  <title>CrawlConda Verified</title>
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#1a1a1a;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#0d0d0d;stop-opacity:1" />
-    </linearGradient>
-  </defs>
+    # Calculate dynamic width based on text
+    label_width = len(label) * 8 + 20
+    claim_width = len(claim_short) * 6.5 + 20
+    total_width = max(label_width + claim_width, 300)
+    
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{int(total_width)}" height="28" role="img" aria-label="CrawlConda: {label}">
+  <title>CrawlConda: {label}</title>
   
-  <!-- Background -->
-  <rect width="400" height="80" rx="8" fill="url(#bg)"/>
-  <rect width="400" height="80" rx="8" fill="none" stroke="{color}" stroke-width="2"/>
+  <!-- Left section (label) -->
+  <rect width="{label_width}" height="28" fill="#2a2a2a"/>
+  <text x="{label_width/2}" y="18" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" 
+        font-size="12" font-weight="600" fill="#e8e8e8" text-anchor="middle">CRAWLCONDA</text>
   
-  <!-- Verdict badge -->
-  <rect x="10" y="10" width="120" height="28" rx="14" fill="{color}"/>
-  <text x="70" y="29" font-family="Arial, sans-serif" font-size="14" font-weight="bold" 
-        fill="white" text-anchor="middle">{emoji} {verdict.split()[0]}</text>
-  
-  <!-- Claim text -->
-  <text x="10" y="52" font-family="Arial, sans-serif" font-size="11" fill="#e8e8e8">
-    {claim_escaped}
-  </text>
-  
-  <!-- Footer -->
-  <text x="10" y="70" font-family="Arial, sans-serif" font-size="9" fill="#666">
-    Verified by CrawlConda · Ground Truth Engine
-  </text>
+  <!-- Right section (verdict) -->
+  <rect x="{label_width}" width="{claim_width}" height="28" fill="{color_scheme['bg']}"/>
+  <text x="{label_width + claim_width/2}" y="18" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" 
+        font-size="12" font-weight="700" fill="{color_scheme['text']}" text-anchor="middle">{label}</text>
 </svg>'''
     
     return svg
