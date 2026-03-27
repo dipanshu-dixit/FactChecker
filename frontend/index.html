@@ -875,6 +875,10 @@
 </div>
 
 <script>
+  // 🔥 FIX #3: Track active request to prevent race conditions
+  let _activeVerifyRequest = null;
+  let _activeVerifyAbortController = null;
+
   // Auto-detect API URL based on environment
   const RAILWAY_API = 'https://factchecker-production-3945.up.railway.app';
   
@@ -960,6 +964,18 @@
     const claim = document.getElementById("claim-input").value.trim();
     if (!claim) return;
 
+    // 🔥 FIX #3: Generate unique request ID
+    const requestId = Date.now() + Math.random();
+    _activeVerifyRequest = requestId;
+    
+    // 🔥 FIX #3: Cancel previous request
+    if (_activeVerifyAbortController) {
+      _activeVerifyAbortController.abort();
+      console.log('[VERIFY] Cancelled previous request');
+    }
+    
+    _activeVerifyAbortController = new AbortController();
+
     const btn    = document.getElementById("verify-btn");
     const result = document.getElementById("verify-result");
 
@@ -1037,9 +1053,21 @@
 
     try {
       console.time('verify');
-      const res = await apiFetch(`/verify?claim=${encodeURIComponent(claim)}`, { headers });
+      const res = await fetch(
+        `${API}/verify?claim=${encodeURIComponent(claim)}`,
+        { 
+          headers,
+          signal: _activeVerifyAbortController.signal
+        }
+      );
       console.timeEnd('verify');
       clearInterval(progressInterval);
+      
+      // 🔥 FIX #3: Check if this request is still active
+      if (_activeVerifyRequest !== requestId) {
+        console.log('[VERIFY] Discarded stale response');
+        return;
+      }
       
       if (!res.ok) {
         if (res.status === 429) {
@@ -1081,11 +1109,28 @@
         </div>
       `;
       
+      // 🔥 FIX #3: Check again before rendering
+      if (_activeVerifyRequest !== requestId) {
+        console.log('[VERIFY] Discarded after parse');
+        return;
+      }
+      
       // Render immediately (no artificial delay)
       setTimeout(() => {
-        result.innerHTML = renderVerdictCard(data, true, claim);
+        if (_activeVerifyRequest === requestId) {
+          result.innerHTML = renderVerdictCard(data, true, claim);
+        }
       }, 300);
     } catch (e) {
+      // 🔥 FIX #3: Ignore aborted requests
+      if (e.name === 'AbortError') {
+        console.log('[VERIFY] Request aborted');
+        return;
+      }
+      
+      // Only show error if still active
+      if (_activeVerifyRequest !== requestId) return;
+      
       clearInterval(progressInterval);
       console.error('Verification error:', e);
       
@@ -1099,7 +1144,7 @@
           const latest = fallbackData.verdicts[fallbackData.verdicts.length - 1];
           const claimMatch = latest.claim?.toLowerCase().trim() === claim.toLowerCase().trim();
           
-          if (claimMatch && latest.verdict) {
+          if (claimMatch && latest.verdict && _activeVerifyRequest === requestId) {
             console.log('[FALLBACK] Found verdict in DB, rendering...');
             result.innerHTML = renderVerdictCard(latest, true, claim);
             return;
@@ -1109,11 +1154,14 @@
         console.error('[FALLBACK] Failed:', fallbackErr);
       }
       
-      result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment. Check "The Record" page in case the result was saved.</div>`;
+      if (_activeVerifyRequest === requestId) {
+        result.innerHTML = `<div class="error-msg">⚠️ Something went wrong. The API may be busy — try again in a moment. Check "The Record" page in case the result was saved.</div>`;
+      }
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = "Investigate";
+      _activeVerifyAbortController = null;
     }
-
-    btn.disabled    = false;
-    btn.textContent = "Investigate";
   }
 
   // ── Trending ─────────────────────────────────────────────────────────────────
@@ -1491,10 +1539,21 @@
 
   // ── SSE — real-time sync (Discord → web, web → web) ─────────────────────────
   let _activeSSE = null;
+  let _reconnectTimer = null;
 
   function connectSSE() {
+    // 🔥 FIX #5: Cancel any pending reconnect
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
+    
+    // 🔥 FIX #5: Properly close existing connection to prevent memory leak
     if (_activeSSE) {
       _activeSSE.close();
+      _activeSSE.onopen = null;
+      _activeSSE.onerror = null;
+      _activeSSE.onmessage = null;
       _activeSSE = null;
     }
     
@@ -1507,14 +1566,17 @@
 
     es.addEventListener("open", () => {
       document.getElementById("live-dot").style.display = "inline-block";
-      connectSSE._retry = 1;  // reset backoff only on confirmed success
+      connectSSE._retry = 1;
     });
 
     es.addEventListener("new_verdict", e => {
       try {
         const data = JSON.parse(e.data);
-        // prepend to global store
+        // 🔥 FIX #7: Prepend and enforce cap
         window._allVerdicts.unshift(data);
+        if (window._allVerdicts.length > 200) {
+          window._allVerdicts = window._allVerdicts.slice(0, 200);
+        }
         updateChipCounts();
         // inject into list only if verdicts page is active and not mid-load
         const list = document.getElementById("verdicts-list");
@@ -1555,16 +1617,39 @@
 
     es.onerror = () => {
       document.getElementById("live-dot").style.display = "none";
-      // exponential back-off capped at 15s
+      
+      // 🔥 FIX #5: Close the failed connection
+      if (_activeSSE === es) {
+        es.close();
+        es.onopen = null;
+        es.onerror = null;
+        es.onmessage = null;
+        _activeSSE = null;
+      }
+      
       const delay = Math.min((connectSSE._retry || 1) * 2000, 15000);
       connectSSE._retry = (connectSSE._retry || 1) + 1;
-      setTimeout(() => {
+      
+      _reconnectTimer = setTimeout(() => {
+        _reconnectTimer = null;
         connectSSE();
       }, delay);
     };
   }
 
   connectSSE();
+
+  // 🔥 FIX #5: Clean up on page unload
+  window.addEventListener('beforeunload', () => {
+    if (_activeSSE) {
+      _activeSSE.close();
+      _activeSSE = null;
+    }
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
+  });
 
   // ── Activity bar ──────────────────────────────────────────────────────────────────
   async function updateActivityBar() {

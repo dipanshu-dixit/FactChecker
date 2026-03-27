@@ -474,6 +474,7 @@ async def pin_to_ipfs(data: dict) -> str:
         return f"{IPFS_GATEWAY}{fallback_id}"  # CLEANED: use constant
 
 async def run_swarm(content: str) -> dict:
+    """Run swarm WITH IPFS (for Discord bot)"""
     result = await swarm.ainvoke({"content": content, "sources": "", "scanned": "", "verdict": "", "published": ""})
     result["ipfs"] = await pin_to_ipfs(result)
     doc_id = result["ipfs"].split("/")[-1]
@@ -485,6 +486,12 @@ async def run_swarm(content: str) -> dict:
             "timestamp": datetime.now(tz=timezone.utc).isoformat()
         }]
     )
+    return result
+
+async def run_swarm_without_ipfs(content: str) -> dict:
+    """Run swarm WITHOUT IPFS (for API - IPFS happens in background)"""
+    result = await swarm.ainvoke({"content": content, "sources": "", "scanned": "", "verdict": "", "published": ""})
+    # NO IPFS upload here - API will handle it in background
     return result
 
 VERDICT_EMOJI = {"CONFIRMED": "✅", "PARTIALLY CONFIRMED": "🟡", "UNCONFIRMED": "⚠️", "FALSE": "❌"}

@@ -11,7 +11,9 @@ import time
 import re
 import os
 import logging
-from typing import Optional
+import hashlib
+from typing import Optional, Dict, Tuple
+from asyncio import Lock, Event
 
 # Configure logging
 logging.basicConfig(
@@ -29,16 +31,17 @@ def normalize_claim(claim: str) -> str:
     return claim
 
 from sse_starlette.sse import EventSourceResponse
-from crawlconda_swarm import run_swarm, VERDICT_EMOJI
+from crawlconda_swarm import run_swarm, run_swarm_without_ipfs, VERDICT_EMOJI
 from api_keys import APIKeyManager
 from badge_generator import generate_badge_svg, generate_badge_html, generate_badge_markdown
 
 DISCORD_VERIFIED_WEBHOOK = os.getenv("DISCORD_VERIFIED_WEBHOOK", "")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
-WEB_URL = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()  # CLEANED: read once at module level
+WEB_URL = os.getenv("WEB_URL", "https://fact-checker-teal.vercel.app").strip()
+PINATA_JWT = os.getenv("PINATA_JWT")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-CHROMA_PATH        = os.getenv("CHROMA_PATH", "/app/crawlconda_data")  # CLEANED: Railway volume path
+CHROMA_PATH        = os.getenv("CHROMA_PATH", "/app/crawlconda_data")
 COL_VERDICTS       = "verified_crawlconda"
 COL_VOTES          = "human_votes"
 TIMEOUT_WEBHOOK    = 10
@@ -50,6 +53,12 @@ SSE_KEEPALIVE_S    = 25
 RATE_LIMIT         = 5
 RATE_WINDOW        = 3600
 CACHE_WINDOW       = 24 * 3600
+IPFS_GATEWAY       = "https://gateway.pinata.cloud/ipfs/"
+PINATA_PIN_URL     = "https://api.pinata.cloud/pinning/pinJSONToIPFS"
+
+# 🔥 FIX #2: Request coalescing infrastructure
+_inflight_requests: Dict[str, Tuple[Event, Optional[dict]]] = {}
+_inflight_lock = Lock()
 
 # Verdict extraction order — check longer strings first to avoid substring matches
 VERDICT_ORDER = [
@@ -114,17 +123,70 @@ async def broadcast(event: dict):
             pass
 
 
+# 🔥 FIX #1: Background IPFS upload
+async def upload_to_ipfs_async(verdict_hash: str, result: dict, claim: str):
+    """Background task: upload to IPFS and update DB"""
+    try:
+        logger.info(f"[IPFS] Starting upload for {verdict_hash}")
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                PINATA_PIN_URL,
+                headers={"Authorization": f"Bearer {PINATA_JWT}"},
+                json={
+                    "pinataContent": result,
+                    "pinataMetadata": {
+                        "name": f"crawlconda-{datetime.now(tz=timezone.utc).isoformat()}"
+                    }
+                },
+                timeout=TIMEOUT_PINATA,
+            )
+            resp.raise_for_status()
+            ipfs_url = f"{IPFS_GATEWAY}{resp.json()['IpfsHash']}"
+        
+        # Update DB with IPFS URL
+        try:
+            verdicts_col.update(
+                ids=[verdict_hash],
+                metadatas=[{
+                    "ipfs_url": ipfs_url,
+                    "status": "archived",
+                    "claim_key": normalize_claim(claim),
+                    "timestamp": datetime.now(tz=timezone.utc).isoformat()
+                }]
+            )
+        except Exception as e:
+            logger.error(f"[IPFS] DB update failed: {e}")
+        
+        # Broadcast IPFS completion
+        await broadcast({
+            "type": "ipfs_complete",
+            "data": {
+                "ipfs_hash": verdict_hash,
+                "ipfs_url": ipfs_url
+            }
+        })
+        
+        logger.info(f"[IPFS] ✓ Archived {verdict_hash} → {ipfs_url}")
+        
+    except Exception as e:
+        logger.error(f"[IPFS] ✗ Failed for {verdict_hash}: {e}")
+        # Verdict still usable without IPFS
+
+
 async def post_to_discord_webhook(payload: dict):
     """Send verdict to Discord #verified channel via webhook."""
     if not DISCORD_VERIFIED_WEBHOOK:
         return
     
     # Validate required fields
-    ipfs_url = payload.get("ipfs_url", "").strip()
     web_url = payload.get("web_url", "").strip()
-    if not ipfs_url or not web_url:
-        print(f"[WEBHOOK] Skipped - missing URLs (ipfs={bool(ipfs_url)}, web={bool(web_url)})")
+    if not web_url:
+        logger.warning(f"[WEBHOOK] Skipped - missing web_url")
         return
+    
+    # 🔥 FIX #1: IPFS URL is optional now (may not be ready yet)
+    ipfs_url = payload.get("ipfs_url", "").strip() or "Archiving..."
     
     verdict = payload.get("verdict", "UNCONFIRMED")
     colors = {
@@ -288,6 +350,8 @@ def get_api_key(authorization: str = Header(default="")) -> Optional[str]:
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
+# 🔥 REPLACE THE ENTIRE /verify ENDPOINT IN api.py WITH THIS CODE
+
 @app.get("/verify")
 async def verify(claim: str, request: Request, authorization: str = Header(default="")):
     start_time = time.time()
@@ -297,43 +361,10 @@ async def verify(claim: str, request: Request, authorization: str = Header(defau
     if len(claim.strip()) < 8:
         raise HTTPException(status_code=400, detail="Claim too short. Please enter at least 8 characters.")
 
-    # ── 2. Check for API key (higher rate limit) ──────────────────────────────
-    api_key = get_api_key(authorization)
-    if api_key:
-        # Validate API key
-        key_meta = api_key_manager.validate_key(api_key)
-        if not key_meta:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        
-        # Check API key rate limit
-        if not api_key_manager.increment_usage(api_key):
-            tier = key_meta.get("tier", "free")
-            limit = 1000 if tier == "pro" else 100
-            raise HTTPException(
-                status_code=429,
-                detail=f"API key rate limit exceeded. {tier.title()} tier: {limit} requests/day"
-            )
-        
-        # Skip IP rate limit for valid API keys
-        logger.info(f"[API_KEY] Request from {key_meta.get('name', 'unknown')}")
-    else:
-        # ── 3. IP-based rate limit (no API key) ───────────────────────────────
-        ip = request.headers.get(
-            "x-forwarded-for", request.client.host
-        ).split(",")[0].strip()
-        now = time.time()
-        _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]  # CLEANED: use constant
-        # Periodically purge IPs with no recent requests
-        if len(_rate_store) > 1000:
-            stale = [k for k, v in _rate_store.items() if not v]
-            for k in stale:
-                del _rate_store[k]
-        if len(_rate_store[ip]) >= RATE_LIMIT:  # CLEANED: use constant
-            raise HTTPException(status_code=429, detail="Rate limit exceeded. Max 5 verifications per hour per IP. Get an API key for higher limits.")
-        _rate_store[ip].append(now)
-
-    # ── 3. Duplicate-claim cache (metadata index lookup — O(1)) ───────────────
     claim_key = normalize_claim(claim)
+    now = time.time()
+    
+    # ── 2. Check cache FIRST (before rate limit for cached hits) ──────────────
     try:
         cached_results = verdicts_col.get(
             where={"claim_key": {"$eq": claim_key}},
@@ -348,80 +379,197 @@ async def verify(claim: str, request: Request, authorization: str = Header(defau
                 age = now - datetime.fromisoformat(
                     cached_ts.replace("Z", "+00:00")
                 ).timestamp()
-                if age < CACHE_WINDOW:  # CLEANED: use constant
+                if age < CACHE_WINDOW:
                     votes = votes_col.get(where={"ipfs_hash": doc_id})
                     up   = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
                     down = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
+                    logger.info(f"[CACHE] HIT: {claim_key}")
                     return {**cached, "ipfs_hash": doc_id,
                             "human_upvotes": up, "human_downvotes": down,
                             "cached": True}
     except Exception as e:
-        print(f"[CACHE] miss — {e}")  # CLEANED: add log to silent except
+        logger.warning(f"[CACHE] miss — {e}")
 
-    # ── 4. Full pipeline ───────────────────────────────────────────────────────
-    pipeline_start = time.time()
-    logger.info(f"[VERIFY] Running swarm pipeline...")
-    result = await run_swarm(claim)
-    pipeline_time = time.time() - pipeline_start
-    logger.info(f"[VERIFY] Pipeline completed in {pipeline_time:.2f}s")
-    ipfs_hash = result["ipfs"].split("/")[-1]
-    verdict_line = next(
-        (l for l in result["published"].splitlines() if "VERDICT" in l.upper()), ""
-    )
-    verdict_key = next(
-        (k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED"
-    )
-    sources = [
-        {"title": p[0], "url": p[1], "source": p[2]}
-        for entry in result["sources"].split("|||")[:8]
-        if len(p := entry.split("||")) >= 3
-    ]
-    ts = datetime.now(tz=timezone.utc).isoformat()
-    payload = {
-        "claim": claim,
-        "verdict": verdict_key,
-        "emoji": VERDICT_EMOJI[verdict_key],
-        "summary": result["published"],
-        "sources": sources,
-        "ipfs_hash": ipfs_hash,
-        "ipfs_url": result["ipfs"],
-        "timestamp": ts,
-        "claim_key": claim_key,
-    }
-    # update ChromaDB metadata so future cache lookups hit the index
+    # ── 3. Rate limiting (AFTER cache check) ──────────────────────────────────
+    api_key = get_api_key(authorization)
+    if api_key:
+        key_meta = api_key_manager.validate_key(api_key)
+        if not key_meta:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        
+        if not api_key_manager.increment_usage(api_key):
+            tier = key_meta.get("tier", "free")
+            limit = 1000 if tier == "pro" else 100
+            raise HTTPException(
+                status_code=429,
+                detail=f"API key rate limit exceeded. {tier.title()} tier: {limit} requests/day"
+            )
+        
+        logger.info(f"[API_KEY] Request from {key_meta.get('name', 'unknown')}")
+    else:
+        ip = request.headers.get(
+            "x-forwarded-for", request.client.host
+        ).split(",")[0].strip()
+        _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]
+        if len(_rate_store) > 1000:
+            stale = [k for k, v in _rate_store.items() if not v]
+            for k in stale:
+                del _rate_store[k]
+        if len(_rate_store[ip]) >= RATE_LIMIT:
+            raise HTTPException(
+                status_code=429, 
+                detail="Rate limit exceeded. Max 5 verifications per hour per IP. Get an API key for higher limits."
+            )
+        _rate_store[ip].append(now)
+
+    # 🔥 FIX #2: REQUEST COALESCING
+    async with _inflight_lock:
+        if claim_key in _inflight_requests:
+            event, result = _inflight_requests[claim_key]
+            if result:
+                logger.info(f"[COALESCE] Returning cached result: {claim_key}")
+                return result
+            else:
+                logger.info(f"[COALESCE] Waiting for leader: {claim_key}")
+        else:
+            event = Event()
+            _inflight_requests[claim_key] = (event, None)
+            logger.info(f"[COALESCE] Starting new request: {claim_key}")
+    
+    # If we're a follower, wait
+    if claim_key in _inflight_requests:
+        _, result = _inflight_requests[claim_key]
+        if result is None:
+            event, _ = _inflight_requests[claim_key]
+            await event.wait()
+            _, result = _inflight_requests[claim_key]
+            if result:
+                logger.info(f"[COALESCE] Follower received result: {claim_key}")
+                return result
+    
+    # We're the leader, run the pipeline
     try:
-        verdicts_col.update(
-            ids=[ipfs_hash],
-            metadatas=[{"claim_key": claim_key, "timestamp": ts}],
+        pipeline_start = time.time()
+        logger.info(f"[VERIFY] Running swarm pipeline...")
+        
+        # 🔥 FIX #1: Call version WITHOUT IPFS
+        result = await run_swarm_without_ipfs(claim)
+        
+        pipeline_time = time.time() - pipeline_start
+        logger.info(f"[VERIFY] Pipeline completed in {pipeline_time:.2f}s")
+        
+        # Generate deterministic hash
+        verdict_hash = hashlib.sha256(
+            f"{claim}:{result['published']}:{time.time()}".encode()
+        ).hexdigest()[:16]
+        
+        # Extract verdict
+        verdict_line = next(
+            (l for l in result["published"].splitlines() if "VERDICT" in l.upper()), ""
         )
-    except Exception:
+        verdict_key = next(
+            (k for k in VERDICT_ORDER if k in verdict_line.upper()), "UNCONFIRMED"
+        )
+        
+        # Parse sources
+        sources = [
+            {"title": p[0], "url": p[1], "source": p[2]}
+            for entry in result["sources"].split("|||")[:8]
+            if len(p := entry.split("||")) >= 3
+        ]
+        
+        ts = datetime.now(tz=timezone.utc).isoformat()
+        
+        # Build payload
+        payload = {
+            "claim": claim,
+            "verdict": verdict_key,
+            "emoji": VERDICT_EMOJI[verdict_key],
+            "summary": result["published"],
+            "sources": sources,
+            "ipfs_hash": verdict_hash,
+            "ipfs_url": None,  # 🔥 Will be updated by background task
+            "timestamp": ts,
+            "claim_key": claim_key,
+            "status": "processing"
+        }
+        
+        # Save to DB immediately
         try:
             verdicts_col.upsert(
-                ids=[ipfs_hash],
-                documents=[json.dumps({**result,
+                ids=[verdict_hash],
+                documents=[json.dumps({
+                    **result,
                     "claim": claim,
                     "timestamp": ts,
                     "claim_key": claim_key
                 })],
-                metadatas=[{"claim_key": claim_key, "timestamp": ts}],
+                metadatas=[{
+                    "claim_key": claim_key,
+                    "timestamp": ts,
+                    "status": "processing"
+                }],
             )
         except Exception as e:
-            print(f"[CACHE] Failed to write claim_key: {e}")
-    # log activity
-    _activity_log.append({"type": "verify", "claim": claim, "verdict": verdict_key, "ts": ts})
-    # set web_url BEFORE broadcast so SSE clients receive it
-    payload["web_url"] = f"{WEB_URL}/#/v/{ipfs_hash}"  # CLEANED: use module-level constant
-    # Add vote counts
-    votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
-    payload["human_upvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
-    payload["human_downvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
-    
-    total_time = time.time() - start_time
-    logger.info(f"[VERIFY] COMPLETE: {total_time:.2f}s total (pipeline: {pipeline_time:.2f}s)")
-    
-    await broadcast({"type": "new_verdict", "data": payload})
-    asyncio.create_task(post_to_discord_webhook(payload))
-    return payload
+            logger.error(f"[DB] Failed to save verdict: {e}")
+        
+        # Add vote counts
+        votes = votes_col.get(where={"ipfs_hash": verdict_hash})
+        payload["human_upvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
+        payload["human_downvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
+        
+        # Set web_url
+        payload["web_url"] = f"{WEB_URL}/#/v/{verdict_hash}"
+        
+        # Store result for followers
+        async with _inflight_lock:
+            if claim_key in _inflight_requests:
+                event, _ = _inflight_requests[claim_key]
+                _inflight_requests[claim_key] = (event, payload)
+                event.set()  # Wake up all waiting requests
+        
+        # Clean up after 60 seconds
+        async def cleanup():
+            await asyncio.sleep(60)
+            async with _inflight_lock:
+                if claim_key in _inflight_requests:
+                    del _inflight_requests[claim_key]
+                    logger.info(f"[COALESCE] Cleaned up: {claim_key}")
+        
+        asyncio.create_task(cleanup())
+        
+        # Log activity
+        _activity_log.append({
+            "type": "verify",
+            "claim": claim,
+            "verdict": verdict_key,
+            "ts": ts
+        })
+        
+        total_time = time.time() - start_time
+        logger.info(f"[VERIFY] COMPLETE: {total_time:.2f}s total (pipeline: {pipeline_time:.2f}s)")
+        
+        # 🔥 FIX #1: IPFS upload in background
+        asyncio.create_task(upload_to_ipfs_async(verdict_hash, result, claim))
+        
+        # Broadcast to SSE clients
+        await broadcast({"type": "new_verdict", "data": payload})
+        
+        # Discord webhook (also async)
+        asyncio.create_task(post_to_discord_webhook(payload))
+        
+        return payload
+        
+    except Exception as e:
+        logger.error(f"[VERIFY] Pipeline failed: {e}")
+        # Wake up followers with error
+        async with _inflight_lock:
+            if claim_key in _inflight_requests:
+                event, _ = _inflight_requests[claim_key]
+                event.set()
+                del _inflight_requests[claim_key]
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
+
 
 
 @app.post("/confirm/{ipfs_hash}")
