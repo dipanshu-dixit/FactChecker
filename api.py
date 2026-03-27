@@ -290,6 +290,9 @@ def get_api_key(authorization: str = Header(default="")) -> Optional[str]:
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 @app.get("/verify")
 async def verify(claim: str, request: Request, authorization: str = Header(default="")):
+    start_time = time.time()
+    logger.info(f"[VERIFY] START: {claim[:50]}")
+    
     # ── 1. Minimum length ──────────────────────────────────────────────────────
     if len(claim.strip()) < 8:
         raise HTTPException(status_code=400, detail="Claim too short. Please enter at least 8 characters.")
@@ -356,7 +359,11 @@ async def verify(claim: str, request: Request, authorization: str = Header(defau
         print(f"[CACHE] miss — {e}")  # CLEANED: add log to silent except
 
     # ── 4. Full pipeline ───────────────────────────────────────────────────────
+    pipeline_start = time.time()
+    logger.info(f"[VERIFY] Running swarm pipeline...")
     result = await run_swarm(claim)
+    pipeline_time = time.time() - pipeline_start
+    logger.info(f"[VERIFY] Pipeline completed in {pipeline_time:.2f}s")
     ipfs_hash = result["ipfs"].split("/")[-1]
     verdict_line = next(
         (l for l in result["published"].splitlines() if "VERDICT" in l.upper()), ""
@@ -408,6 +415,10 @@ async def verify(claim: str, request: Request, authorization: str = Header(defau
     votes = votes_col.get(where={"ipfs_hash": ipfs_hash})
     payload["human_upvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "up")
     payload["human_downvotes"] = sum(1 for v in votes["metadatas"] if v["vote"] == "down")
+    
+    total_time = time.time() - start_time
+    logger.info(f"[VERIFY] COMPLETE: {total_time:.2f}s total (pipeline: {pipeline_time:.2f}s)")
+    
     await broadcast({"type": "new_verdict", "data": payload})
     asyncio.create_task(post_to_discord_webhook(payload))
     return payload
