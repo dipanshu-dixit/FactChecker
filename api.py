@@ -423,6 +423,7 @@ async def verify(claim: str, request: Request, authorization: str = Header(defau
         _rate_store[ip].append(now)
 
     # 🔥 FIX #2: REQUEST COALESCING
+    is_leader = False
     async with _inflight_lock:
         if claim_key in _inflight_requests:
             event, result = _inflight_requests[claim_key]
@@ -434,18 +435,23 @@ async def verify(claim: str, request: Request, authorization: str = Header(defau
         else:
             event = Event()
             _inflight_requests[claim_key] = (event, None)
+            is_leader = True
             logger.info(f"[COALESCE] Starting new request: {claim_key}")
     
-    # If we're a follower, wait
-    if claim_key in _inflight_requests:
-        _, result = _inflight_requests[claim_key]
-        if result is None:
-            event, _ = _inflight_requests[claim_key]
-            await event.wait()
-            _, result = _inflight_requests[claim_key]
-            if result:
-                logger.info(f"[COALESCE] Follower received result: {claim_key}")
-                return result
+    # If we're a follower, wait for the leader to publish a result.
+    # NOTE: leaders must NOT wait on their own event or we deadlock.
+    if not is_leader:
+        await event.wait()
+        async with _inflight_lock:
+            inflight = _inflight_requests.get(claim_key)
+            result = inflight[1] if inflight else None
+        if result:
+            logger.info(f"[COALESCE] Follower received result: {claim_key}")
+            return result
+        raise HTTPException(
+            status_code=500,
+            detail="Verification failed while waiting for an in-flight request."
+        )
     
     # We're the leader, run the pipeline
     try:
