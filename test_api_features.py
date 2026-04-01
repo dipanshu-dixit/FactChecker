@@ -1,13 +1,51 @@
 #!/usr/bin/env python3
-"""Test script for API key and badge features."""
+"""Integration tests for API key and badge features."""
 
 import requests
-import json
 import time
+import pytest
 
 BASE_URL = "http://localhost:8000"
 
-def test_rate_limit_without_key():
+@pytest.fixture(scope="session")
+def server_available():
+    """Skip integration tests when local API server is not running."""
+    try:
+        requests.get(f"{BASE_URL}/health", timeout=3)
+    except requests.RequestException:
+        pytest.skip("Local API server is not running on http://localhost:8000")
+
+
+@pytest.fixture(scope="session")
+def api_key(server_available):
+    """Generate an API key once for the full test session."""
+    response = requests.post(
+        f"{BASE_URL}/api-keys/generate",
+        json={
+            "name": "Test User",
+            "email": "test@example.com",
+            "use_case": "Testing API features"
+        },
+        timeout=30
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["api_key"]
+
+
+@pytest.fixture(scope="session")
+def ipfs_hash(api_key):
+    """Create one verification result and reuse its hash for dependent tests."""
+    response = requests.get(
+        f"{BASE_URL}/verify",
+        params={"claim": "Test claim for API"},
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=120,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["ipfs_hash"]
+
+
+def test_rate_limit_without_key(server_available):
     """Test IP-based rate limit (5 requests/hour)."""
     print("\n🔒 Testing Rate Limit WITHOUT API Key...")
     print("   Limit: 5 requests per hour per IP")
@@ -37,27 +75,21 @@ def test_rate_limit_without_key():
             time.sleep(2)
 
 
-def test_api_key_generation():
-    """Test API key generation."""
-    print("\n🔑 Testing API Key Generation...")
-    
+def test_api_key_generation(server_available):
+    """Test API key generation endpoint without relying on fixture state."""
     response = requests.post(
         f"{BASE_URL}/api-keys/generate",
         json={
             "name": "Test User",
             "email": "test@example.com",
             "use_case": "Testing API features"
-        }
+        },
+        timeout=30,
     )
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"✅ API Key generated: {data['api_key'][:20]}...")
-        print(f"   Tier: {data['tier']}, Limit: {data['daily_limit']}/day")
-        return data['api_key']
-    else:
-        print(f"❌ Failed: {response.status_code} - {response.text}")
-        return None
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "api_key" in data
+    assert data.get("daily_limit", 0) > 0
 
 
 def test_verify_with_key(api_key):
@@ -73,15 +105,10 @@ def test_verify_with_key(api_key):
         timeout=120
     )
     
-    if response.status_code == 200:
-        data = response.json()
-        print(f"✅ Verification successful")
-        print(f"   Verdict: {data['verdict']}")
-        print(f"   IPFS Hash: {data['ipfs_hash']}")
-        return data['ipfs_hash']
-    else:
-        print(f"❌ Failed: {response.status_code} - {response.text}")
-        return None
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "verdict" in data
+    assert "ipfs_hash" in data
 
 
 def test_api_key_usage(api_key):
@@ -93,13 +120,10 @@ def test_api_key_usage(api_key):
         headers={"Authorization": f"Bearer {api_key}"}
     )
     
-    if response.status_code == 200:
-        data = response.json()
-        print(f"✅ Usage retrieved")
-        print(f"   Requests today: {data['requests_today']}/{data['daily_limit']}")
-        print(f"   Total requests: {data['total_requests']}")
-    else:
-        print(f"❌ Failed: {response.status_code} - {response.text}")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "requests_today" in data
+    assert "daily_limit" in data
 
 
 def test_badge_svg(ipfs_hash):
@@ -108,11 +132,9 @@ def test_badge_svg(ipfs_hash):
     
     response = requests.get(f"{BASE_URL}/badge/{ipfs_hash}.svg")
     
-    if response.status_code == 200:
-        print(f"✅ Badge SVG generated ({len(response.content)} bytes)")
-        print(f"   Content-Type: {response.headers.get('content-type')}")
-    else:
-        print(f"❌ Failed: {response.status_code}")
+    assert response.status_code == 200
+    assert "image/svg+xml" in response.headers.get("content-type", "")
+    assert len(response.content) > 0
 
 
 def test_badge_embed(ipfs_hash):
@@ -121,13 +143,11 @@ def test_badge_embed(ipfs_hash):
     
     response = requests.get(f"{BASE_URL}/badge/{ipfs_hash}/embed")
     
-    if response.status_code == 200:
-        data = response.json()
-        print(f"✅ Embed codes generated")
-        print(f"   HTML: {data['embed']['html'][:60]}...")
-        print(f"   Markdown: {data['embed']['markdown'][:60]}...")
-    else:
-        print(f"❌ Failed: {response.status_code}")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "embed" in data
+    assert "html" in data["embed"]
+    assert "markdown" in data["embed"]
 
 
 def test_claim_page(ipfs_hash):
@@ -136,16 +156,10 @@ def test_claim_page(ipfs_hash):
     
     response = requests.get(f"{BASE_URL}/claim/{ipfs_hash}")
     
-    if response.status_code == 200:
-        html = response.text
-        has_og_tags = 'og:title' in html and 'og:image' in html
-        has_twitter_tags = 'twitter:card' in html
-        
-        print(f"✅ Claim page generated ({len(html)} bytes)")
-        print(f"   Open Graph tags: {'✓' if has_og_tags else '✗'}")
-        print(f"   Twitter Card tags: {'✓' if has_twitter_tags else '✗'}")
-    else:
-        print(f"❌ Failed: {response.status_code}")
+    assert response.status_code == 200
+    html = response.text
+    assert 'og:title' in html and 'og:image' in html
+    assert 'twitter:card' in html
 
 
 def test_rate_limit_with_key(api_key):
@@ -153,35 +167,26 @@ def test_rate_limit_with_key(api_key):
     print("\n🔐 Testing Rate Limit WITH API Key...")
     print("   Limit: 100 requests per day (free tier)")
     
-    try:
-        for i in range(3):
-            response = requests.get(
-                f"{BASE_URL}/verify",
-                params={"claim": f"Test with key {i+1}"},
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=120
-            )
-            
-            if response.status_code == 200:
-                print(f"   ✅ Request {i+1}/3: Success (using API key)")
-            elif response.status_code == 429:
-                print(f"   ❌ Request {i+1}/3: Rate limited (100/day exceeded)")
-                break
-            
-            time.sleep(2)
-        
-        usage_res = requests.get(
-            f"{BASE_URL}/api-keys/usage",
-            headers={"Authorization": f"Bearer {api_key}"}
+    for i in range(3):
+        response = requests.get(
+            f"{BASE_URL}/verify",
+            params={"claim": f"Test with key {i+1}"},
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=120
         )
-        
-        if usage_res.ok:
-            data = usage_res.json()
-            print(f"\n   📊 Current usage: {data['requests_today']}/{data['daily_limit']}")
-            remaining = data['daily_limit'] - data['requests_today']
-            print(f"   🔥 Remaining today: {remaining} requests")
-    except Exception as e:
-        print(f"   ❌ Failed: {e}")
+        assert response.status_code in (200, 429), response.text
+        if response.status_code == 429:
+            break
+        time.sleep(2)
+
+    usage_res = requests.get(
+        f"{BASE_URL}/api-keys/usage",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=30,
+    )
+    assert usage_res.status_code == 200, usage_res.text
+    data = usage_res.json()
+    assert data["requests_today"] <= data["daily_limit"]
 
 
 def main():
